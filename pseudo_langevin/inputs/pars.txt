@@ -1,0 +1,46 @@
+# main inputs
+
+## model
+from ../model_trained/run3/model_trained.pt		#path to the .pt file containing the starting weights (if None, gaussian initialization of the weights)
+d 64		#embedding size
+H 1			#number of heads 
+m 256		#number of neurons of FFNN
+L 1			#number of encoder block
+n 86		#length of sequence
+
+
+## dataset
+filename ../sequences/SequencesMasked.txt		#file containing the data
+n_data 1000				#total number of data points
+validation_rate 0.1		#fraction of validation data compared to the whole dataset
+
+
+## cost function
+cost CE					#cost function employed during the sampling
+zeta 0.5				#additive parameters for the cost function
+
+
+## metric function
+metric accuracy_CE		#metric function employed during the sampling
+
+
+## generator
+generator_seed 7		#torch generator seed
+
+
+## sampler
+stime_list  [1.0e+2, 1.0e+2]	#list of simulated times (moves=stime/dt)
+T_list      [1.0e-4, 1.0e-4]	#list of sampled temperatures
+Tratio_list [1.0e-2, 1.0e-2]	#list of ratios between the sampled temperatures and the mini-batch effective temperatures
+dt_list     [1.0e-2, 1.0e-2]	#list of single-integration time steps
+m1_list     [0.3,    0.3]		#list of mobilities to compute the correct mass of the system (where mobility^2+inertia^2=1, with 0<mobility<1)
+
+lamda 1.0e-6			#regularization term coefficient
+mbs 64					#mini-batch size employed for the computation of the gradients during the dynamics
+max_extractions 5000	#maximum number of mini-batch extractions during estimate of std
+extractions 200			#mini-batch extractions added to improve the estimate of std
+threshold_est 0.05		#threshold for convergence of the std estimate
+max_adj_step 50000		#maximum number of steps after which std is adjourned
+min_adj_step 1000		#scale for the increase of the number of steps after which std is adjourned
+opt_streak 20			#scale of the streak for std adjournment
+threshold_adj 0.05		#threshold for keeping the streak during std adjournment

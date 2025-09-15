@@ -1,0 +1,42 @@
+# main inputs
+
+## model
+from results_sim75/sim10/weights/w73700.pt		#path to the .pt file containing the starting weights (if None, gaussian initialization of the weights)       results_sim75/sim10/weights/w73700.pt
+d 64				#embedding size
+H 1				#number of heads 
+m 256				#number of neurons of FFNN
+L 3				#number of encoder block
+n 86				#length of sequence
+
+## train
+batch_size_train 64
+warmup_steps 4e3
+betas (0.9, 0.98)  
+eps 1e-9
+validation_rate 0.1
+n_data 5000
+
+
+## cost function
+cost CE				#cost function employed for the sampling
+zeta 0.5			#additive parameters for the cost function
+
+## metric function
+metric accuracy_CE			#metric function employed during the sampling
+
+## generator
+generator_seed 7		#torch generator seed
+
+
+## sampler
+stime_list  [1.0e+3]     	#list of simulated times (moves=stime/(dt*isteps))
+T_list      [1.5e-3]     	#list of sampled temperatures
+dt_list     [7.5e-4]       	#list of single-integration time-steps
+isteps_list [10]		#list of number of integration steps per move
+m_list      [1.0]		#list of weights masses
+lamda       1e-6		#regularization term coefficient
+lob         0			#boolean variable, whether to substitute or not lambda->lambda/beta 
+start       0
+batch_size_grad 256    		#batch size to compute grad and calculate integral
+batch_size 64			# batch size to compute U
+
