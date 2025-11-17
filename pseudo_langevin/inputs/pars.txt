@@ -1,0 +1,40 @@
+# main inputs
+
+## model
+input_dim 100			#dimension of the input vector
+hidden_dims [50, 100]	#number of neurons in the hidden layers
+output_dim 10			#number of neurons in the output layer (i.e. the number of classes)
+model_seed 0			#seed for weights generation
+from None				#path to the .pt file containing the starting weights (if None, gaussian initialization of the weights)
+
+
+## data
+alpha 5.0				#alpha=P/N value
+K 10					#number of reference kspin vectors
+d 100					#dimension of the kspin vectors
+pflip 0.355				#probability of flipping a spin component starting when generating a new kspin vector from a reference one
+data_seed 50			#data generation seed
+
+
+## sampler
+stime      [1.0e+5]		#list of simulated times (moves=stime/dt)
+T          [1.0e-6]		#list of sampled temperatures
+T_ratio_i  [3.0e-2]		#list of initial ratios between the sampled temperatures and the mini-batch effective temperatures
+m1         [0.1]		#list of mobilities to compute the correct mass of the system (where mobility^2+inertia^2=1, with 0<mobility<1)
+adj_ref    [1]			#list of boolean variables, whether to considere as reference weights the current weights vector at the start of each simulation with a new set of parameters
+
+Lamda 10.0611			#cumulative Lagrange multiplier of the L2 regularization term
+gamma 0.0				#parabolic term between the current weights configuration and the reference weights vector
+T_ratio_max 3.0e-1		#maximum value for the ratio between mini-batch and sampled temperatures, after which the mass matrix (and consequently the momenta) start to get updated in its place
+mean 1					#boolean variable, whether to use (1, default) or not (0) the mean variance for each layer when computing the noise induced by mini-batch extraction 
+axis 0					#the starting axis along which to compute the mean (if mean==1), that is axis=(axis, ..., ndim). axis==0 means per-layer description of the variances.
+mbf 0.01				#mini-batch fraction (w.r.t. the full batch) employed for the computation of the gradients during the dynamics
+bss 0					#batch splitting size used to divide the full batch when sampling
+
+max_extractions 5000	#maximum number of mini-batch extractions during estimate of var
+min_extractions 500		#minimum number of mini-batch extractions added to improve the estimate of var
+threshold_est 0.05		#threshold for convergence of the var estimate
+max_adj_step 50000		#maximum number of steps after which var is adjourned
+min_adj_step 10000		#minimum number of steps after which var is adjourned
+threshold_adj 0.05		#threshold for keeping the streak during var adjournment
+seed 7					#torch generator seed

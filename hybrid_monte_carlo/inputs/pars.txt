@@ -1,0 +1,30 @@
+# main inputs
+
+## model
+input_dim 100			#dimension of the input vector
+hidden_dims [50, 100]	#number of neurons in the hidden layers
+output_dim 10			#number of neurons in the output layer (i.e. the number of classes)
+model_seed 0			#seed for weights generation
+from None				#path to the .pt file containing the starting weights (if None, gaussian initialization of the weights)
+
+
+## data
+alpha 5.0				#alpha=P/N value
+K 10					#number of reference kspin vectors
+d 100					#dimension of the kspin vectors
+pflip 0.355				#probability of flipping a spin component starting when generating a new kspin vector from a reference one
+data_seed 50			#data generation seed
+
+
+## sampler
+stime   [1.0e+6]		#list of simulated times (moves=stime/dt)
+T       [1.0e-6]		#list of sampled temperatures
+dt      [1.0e-1]		#list of single-integration time steps
+isteps  [1000]			#list of the number of integration steps per-move
+adj_ref [1]				#list of boolean variables, whether to considere as reference weights the current weights vector at the start of each simulation with a new set of parameters
+
+Lamda 10.0611			#cumulative Lagrange multiplier of the L2 regularization term
+gamma 0.0				#parabolic term between the current weights configuration and the reference weights vector
+M 1.0					#weights vector mass
+bss 0					#batch splitting size used to divide the full batch when computing observables (and gradient during the integration)
+seed 7					#torch generator seed
