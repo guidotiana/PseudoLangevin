@@ -177,6 +177,9 @@ class PLSampler():
 			assert all([v in [0,1] for k,v in pars_list[idx].items() if k in ["adj_ref", "mean"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("adj_ref", "mean") at index {idx}. Allowed values: v==0 or v==1.'
 			)
+            assert all([v<0 for k,v in pars_list[idx].items() if k in ["log_zerovar"]]), (
+                f'{self.name}._setup(): invalid value for one of the following keys ("log_zerovar") at index {idx}. Allowed values: v<0.'
+            )
 			assert all([pars_list[idx][key]<=pars_list[idx]["T_ratio_max"] for key in ["T_ratio_i", "T_ratio_f"]]), (
 				f'{self.name}._setup(): "T_ratio_i" ({pars_list[idx]["T_ratio_i"]}) and "T_ratio_f" ({pars_list[idx]["T_ratio_f"]}) must be lower than "T_ratio_max" ({pars_list[idx]["T_ratio_max"]}).',
 				f'Check values at index {idx}.'
@@ -417,8 +420,12 @@ class PLSampler():
 				for layer, value in grad.items():
 					sum_grad[layer] += value.detach().clone()
 					sum2_grad[layer] += (value**2.).detach().clone()
+
 		tot_extractions = varpars['min_extractions']
-		curr_var = {layer: estimate_variance(sum2_grad[layer], sum_grad[layer], tot_extractions, mean=varpars["mean"], axis=varpars["axis"]) for layer in sum_grad}
+        curr_var = {}
+        for layer in sum_grad:
+		    curr_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
+            curr_var[layer][curr_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
 		if verbose:
 			print(f"First estimate at {tot_extractions} extractions terminated.")
 
@@ -434,9 +441,10 @@ class PLSampler():
 			converged = []
 			next_var = {}
 			for layer, curr_var_l in curr_var.items():
-				next_var[layer] = estimate_variance(sum2_grad[layer], sum_grad[layer], tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-				converged.append( 
-						torch.all( abs( torch.sqrt(next_var[layer]/curr_var_l) - 1. ) < varpars['threshold_est'] ).item()
+				next_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
+				next_var[layer][next_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
+                converged.append( 
+						torch.all( abs( torch.sqrt(next_var[layer]/curr_var_l) - 1. ) <= varpars['threshold_est'] ).item()
 				)
 			if verbose:
 				print(f"Further estimate at {tot_extractions} extractions. Converged: {all(converged)} ({sum(converged)}/{len(converged)}).")
@@ -618,7 +626,7 @@ class PLSampler():
 		# pars dictionary
 		if dname == "varpars":
 			types_and_keys = [
-					(int,  ['moves', 'tot_moves', 'max_resets', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak']),
+					(int,  ['moves', 'tot_moves', 'max_resets', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak', 'log_zerovar']),
 					(bool, ['adj_ref', 'mean']),
 			]
 		# data dictionary
@@ -658,6 +666,7 @@ class PLSampler():
 			"max_adj_step": (100000, int),
 			"min_adj_step": (10000, int),
 			"threshold_adj": (0.05, float),
+            "log_zerovar": (-12, int),
 			"seed": (0, int),
 		}
 

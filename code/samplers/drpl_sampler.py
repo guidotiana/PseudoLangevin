@@ -177,6 +177,9 @@ class DRPLSampler():
 			assert all([v in [0,1] for k,v in pars_list[idx].items() if k in ["adj_ref", "mean"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("adj_ref", "mean") at index {idx}. Allowed values: v==0 or v==1.'
 			)
+            assert all([v<0 for k,v in pars_list[idx].items() if k in ["log_zerovar"]]), (
+                f'{self.name}._setup(): invalid value for one of the following keys ("log_zerovar") at index {idx}. Allowed values: v<0.'
+            )
 			pars_list[idx]["max_extractions"] = roundup(pars_list[idx]["max_extractions"], pars_list[idx]["min_extractions"])
 			pars_list[idx]["min_adj_step"] = roundup(pars_list[idx]["min_adj_step"], self.stepscale)
 			pars_list[idx]["max_adj_step"] = roundup(pars_list[idx]["max_adj_step"], pars_list[idx]["min_adj_step"])
@@ -516,8 +519,12 @@ class DRPLSampler():
 				for layer in grad:
 					sum_grad[layer] += grad[layer].detach()
 					sum2_grad[layer] += (grad[layer]**2.).detach()
-		tot_extractions = varpars['min_extractions']
-		curr_var = {layer: estimate_variance(sum2_grad[layer], sum_grad[layer], tot_extractions, mean=varpars["mean"], axis=varpars["axis"]) for layer in sum_grad}
+		
+        tot_extractions = varpars['min_extractions']
+        curr_var = {}
+        for layer in sum_grad:
+            curr_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
+            curr_var[layer][curr_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
 		if verbose:
 			print(f"First estimate at {tot_extractions} extractions terminated.")
 			for layer in curr_var:
@@ -536,9 +543,10 @@ class DRPLSampler():
 			converged = []
 			next_var = {}
 			for layer, curr_var_l in curr_var.items():
-				next_var[layer] = estimate_variance(sum2_grad[layer], sum_grad[layer], tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-				converged.append( 
-						torch.all( abs(next_var[layer]-curr_var_l)/curr_var_l < varpars['threshold_est'] ).item()
+				next_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
+				next_var[layer][next_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
+                converged.append( 
+						torch.all( abs(next_var[layer]-curr_var_l)/curr_var_l <= varpars['threshold_est'] ).item()
 				)
 			if verbose:
 				print(f"Further estimate at {tot_extractions} extractions. Converged: {all(converged)} ({sum(converged)}/{len(converged)}).")
@@ -734,7 +742,7 @@ class DRPLSampler():
 		# pars dictionary
 		if dname == "varpars":
 			types_and_keys = [
-					(int,  ['moves', 'tot_moves', 'max_resets', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak']),
+					(int,  ['moves', 'tot_moves', 'max_resets', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak', 'log_zerovar']),
 					(bool, ['adj_ref', 'mean']),
 			]
 		# data dictionary
@@ -774,6 +782,7 @@ class DRPLSampler():
 			"max_adj_step": (50000, int),
 			"min_adj_step": (5000, int),
 			"threshold_adj": (0.1, float),
+            "log_zerovar": (-12, int),
 			"seed": (0, int),
 			"loss_eq": (1., float), 
 		}
