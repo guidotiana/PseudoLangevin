@@ -593,10 +593,13 @@ class PLSampler():
 		lines.append(f'# moves:                      {pars_idx["moves"]:.1e}')
 		lines.append(f'# temperature:                {pars_idx["T"]:.1e}')
 		lines.append(f'# initial temperatures ratio: {pars_idx["T_ratio_i"]:.1e}')
-		lines.append(f'# final temperatures ratio:   {pars_idx["T_ratio_f"]:.1e}')
-		lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
-		lines.append(f'# layer reset probability:    {pars_idx["p_reset"]:.2f}')
-		lines.append(f'# maximum number of resets:   {pars_idx["max_resets"]:.0f}')
+        if pars_idx["p_reset"] > 0.:
+		    lines.append(f'# final temperatures ratio:   {pars_idx["T_ratio_f"]:.1e}')
+		    lines.append(f'# layer reset probability:    {pars_idx["p_reset"]:.2f}')
+            lines.append(f'# maximum number of resets:   {pars_idx["max_resets"]:.0f}')
+        lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
+        lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
+        lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
 		lines.append(f'# mini-batch size:            {pars_idx["mbs"]:.0f}')
 		if pars_idx["mean"]:
 			lines.append(f'# mean variances:             {pars_idx["mean"]} (from axis={pars_idx["axis"]})')
