@@ -669,7 +669,7 @@ class PLSampler():
 			"max_adj_step": (100000, int),
 			"min_adj_step": (10000, int),
 			"threshold_adj": (0.05, float),
-            "log_zerovar": (-12, int),
+            "log_zerovar": (-9, int),
 			"seed": (0, int),
 		}
 
