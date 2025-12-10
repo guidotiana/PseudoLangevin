@@ -312,7 +312,7 @@ class HMCSampler():
 
 	def _compute_observables(self, lamda, gamma, bss, backward=True, extra=False):
 		P = len(self.dataset)
-		Nbs = round(P/bss)
+		Nbs = Nbs = P//bss if P%bss==0 else P//bss+1
 
 		cost, metric = 0., 0.
 		for ibs in range(Nbs):

@@ -489,7 +489,8 @@ class DRPLSampler():
 
 	def _compute_grad(self, varpars, which_end, ratchet, eq):
 		mb_mask = torch.zeros((len(self.dataset),), dtype=torch.bool)
-		mb_idxs = torch.randperm(len(self.dataset), device=self.models['fe'].device, generator=self.generator.get())[:varpars['mbs']]
+        mb_idxs = torch.randint(low=0, high=len(self.dataset), size=(varpars['mbs'],), device=self.models['fe'].device, generator=self.generator.get())
+		#WRONG: mb_idxs = torch.randperm(len(self.dataset), device=self.models['fe'].device, generator=self.generator.get())[:varpars['mbs']]
 		mb_mask[mb_idxs] = True
 		x, y, _ = self.dataset[mb_mask]
 		

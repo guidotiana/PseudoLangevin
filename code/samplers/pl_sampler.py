@@ -177,9 +177,9 @@ class PLSampler():
 			assert all([v in [0,1] for k,v in pars_list[idx].items() if k in ["adj_ref", "mean"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("adj_ref", "mean") at index {idx}. Allowed values: v==0 or v==1.'
 			)
-            assert all([v<0 for k,v in pars_list[idx].items() if k in ["log_zerovar"]]), (
-                f'{self.name}._setup(): invalid value for one of the following keys ("log_zerovar") at index {idx}. Allowed values: v<0.'
-            )
+			assert all([v<0 for k,v in pars_list[idx].items() if k in ["log_zerovar"]]), (
+				f'{self.name}._setup(): invalid value for one of the following keys ("log_zerovar") at index {idx}. Allowed values: v<0.'
+			)
 			assert all([pars_list[idx][key]<=pars_list[idx]["T_ratio_max"] for key in ["T_ratio_i", "T_ratio_f"]]), (
 				f'{self.name}._setup(): "T_ratio_i" ({pars_list[idx]["T_ratio_i"]}) and "T_ratio_f" ({pars_list[idx]["T_ratio_f"]}) must be lower than "T_ratio_max" ({pars_list[idx]["T_ratio_max"]}).',
 				f'Check values at index {idx}.'
@@ -364,7 +364,7 @@ class PLSampler():
 			d2 = d2.detach().item()
 
 			P = len(self.dataset)
-			Nbs = round(P/bss)
+			Nbs = P//bss if P%bss==0 else P//bss+1
 
 			cost, metric = 0., 0.
 			for ibs in range(Nbs):
@@ -391,7 +391,8 @@ class PLSampler():
 
 	def _compute_grad(self, varpars):
 		mb_mask = torch.zeros((len(self.dataset),), dtype=torch.bool)
-		mb_idxs = torch.randperm(len(self.dataset), device=self.model.device, generator=self.generator.get())[:varpars['mbs']]
+		mb_idxs = torch.randint(low=0, high=len(self.dataset), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
+		#WRONG: mb_idxs = torch.randperm(len(self.dataset), device=self.model.device, generator=self.generator.get())[:varpars['mbs']]
 		mb_mask[mb_idxs] = True
 		x, y = self.dataset[mb_mask]
 		_ = self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], x=x, y=y)
@@ -420,12 +421,12 @@ class PLSampler():
 				for layer, value in grad.items():
 					sum_grad[layer] += value.detach().clone()
 					sum2_grad[layer] += (value**2.).detach().clone()
-
+		
 		tot_extractions = varpars['min_extractions']
-        curr_var = {}
-        for layer in sum_grad:
-		    curr_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-            curr_var[layer][curr_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
+		curr_var = {}
+		for layer in sum_grad:
+			curr_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
+			curr_var[layer][curr_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
 		if verbose:
 			print(f"First estimate at {tot_extractions} extractions terminated.")
 
@@ -443,7 +444,7 @@ class PLSampler():
 			for layer, curr_var_l in curr_var.items():
 				next_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
 				next_var[layer][next_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
-                converged.append( 
+				converged.append( 
 						torch.all( abs( torch.sqrt(next_var[layer]/curr_var_l) - 1. ) <= varpars['threshold_est'] ).item()
 				)
 			if verbose:
@@ -481,26 +482,37 @@ class PLSampler():
 			counter = 0
 			for perm_layer, reset in zip(perm_layers, resets):
 				curr_var_pl = curr_var[perm_layer]
-				T_ratio_updated = varpars['T_ratio'][perm_layer] * curr_var_pl/varpars['var'][perm_layer]
+				curr_T_ratio_pl = varpars['T_ratio'][perm_layer] * curr_var_pl/varpars['var'][perm_layer]
 
 				# 1.1 Reset mini-batch temperature to final value
 				if reset and (counter < varpars['max_resets']):
 					varpars['T_ratio'][perm_layer] = torch.full_like(curr_var_pl, varpars['T_ratio_f'])
-					varpars['M'][perm_layer] *= T_ratio_updated/varpars['T_ratio_f']
-					momenta[perm_layer] *= torch.sqrt(T_ratio_updated/varpars['T_ratio_f'])
+					varpars['M'][perm_layer] *= curr_T_ratio_pl/varpars['T_ratio_f']
+					momenta[perm_layer] = torch.randn(momenta[perm_layer].shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][perm_layer])
 					counter += 1
 					print(f"RESET: T_ratios on layer {perm_layer} have been reset to goal (final) value {varpars['T_ratio_f']} (counter={counter}).")
 
 				# 1.2 Standard (controlled) update of the mini-batch temperature
 				else:
-					mask = T_ratio_updated > varpars['T_ratio_max']
-					varpars['T_ratio'][perm_layer] = T_ratio_updated
-					if mask.sum().item() > 0:
+					varpars['T_ratio'][perm_layer] = curr_T_ratio_pl
+
+					mask = curr_T_ratio_pl > varpars['T_ratio_max']
+					if mask.any().item():
 						varpars['T_ratio'][perm_layer][mask] = varpars['T_ratio_max']
-						varpars['M'][perm_layer][mask] *= T_ratio_updated[mask]/varpars['T_ratio_max']
-						repeated_shape = tuple( [1]*varpars["axis"] + list(momenta[perm_layer].shape[varpars["axis"]:]) )
-						momenta[perm_layer][ mask.repeat(repeated_shape) ] *= torch.sqrt(T_ratio_updated[mask]/varpars['T_ratio_max'])
-						print(f"ALERT: T_ratios on layer {perm_layer} have reached the threshold value {varpars['T_ratio_max']}, which is highly unstable. Starting the update of the mass matrix M!")
+						varpars['M'][perm_layer][mask] *= curr_T_ratio_pl[mask]/varpars['T_ratio_max']
+
+						flat_momenta_pl = momenta[perm_layer].flatten()
+						if varpars["mean"]:
+							repeated_shape = tuple( [1]*varpars["axis"] + list(momenta[perm_layer].shape[varpars["axis"]:]) )
+							repeated_mask = mask.repeat(repeated_shape)
+							flat_M_pl_masked = varpars['M'][perm_layer].repeat(repeated_shape)[repeated_mask].flatten()
+							flat_momenta_pl[ repeated_mask.flatten() ] = torch.randn(repeated_mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*flat_M_pl_masked)
+						else:
+							flat_M_pl_masked = varpars['M'][perm_layer][mask].flatten()
+							flat_momenta_pl[ mask.flatten() ] = torch.randn(mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*flat_M_pl_masked)
+							
+						momenta[perm_layer] = flat_momenta_pl.reshape(momenta[perm_layer].shape)
+						print(f"ALERT: T_ratios on layer {perm_layer} have reached the threshold value {varpars['T_ratio_max']}. Starting the update of the mass matrix M!")
 				
 				varpars['k_wn'][perm_layer] = torch.sqrt( varpars['M'][perm_layer]*varpars['T']*varpars['m1']**2. - curr_var_pl*(varpars['dt']/2.)**2. )
 
@@ -593,13 +605,13 @@ class PLSampler():
 		lines.append(f'# moves:                      {pars_idx["moves"]:.1e}')
 		lines.append(f'# temperature:                {pars_idx["T"]:.1e}')
 		lines.append(f'# initial temperatures ratio: {pars_idx["T_ratio_i"]:.1e}')
-        if pars_idx["p_reset"] > 0.:
-		    lines.append(f'# final temperatures ratio:   {pars_idx["T_ratio_f"]:.1e}')
-		    lines.append(f'# layer reset probability:    {pars_idx["p_reset"]:.2f}')
-            lines.append(f'# maximum number of resets:   {pars_idx["max_resets"]:.0f}')
-        lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
-        lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
-        lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
+		if pars_idx["p_reset"] > 0.:
+			lines.append(f'# final temperatures ratio:   {pars_idx["T_ratio_f"]:.1e}')
+			lines.append(f'# layer reset probability:    {pars_idx["p_reset"]:.2f}')
+			lines.append(f'# maximum number of resets:   {pars_idx["max_resets"]:.0f}')
+		lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
+		lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
+		lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
 		lines.append(f'# mini-batch size:            {pars_idx["mbs"]:.0f}')
 		if pars_idx["mean"]:
 			lines.append(f'# mean variances:             {pars_idx["mean"]} (from axis={pars_idx["axis"]})')
@@ -669,7 +681,7 @@ class PLSampler():
 			"max_adj_step": (100000, int),
 			"min_adj_step": (10000, int),
 			"threshold_adj": (0.05, float),
-            "log_zerovar": (-9, int),
+			"log_zerovar": (-9, int), 
 			"seed": (0, int),
 		}
 
