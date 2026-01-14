@@ -4,8 +4,8 @@ from io import StringIO
 from time import process_time as ptime
 from collections.abc import Callable
 
-import math
 import torch
+import numpy as np
 
 from models.nnmodel import NNModel
 from generator.custom_generator import CustomGenerator
@@ -167,8 +167,8 @@ class PLSampler():
 			assert all([0.<v<1. for k,v in pars_list[idx].items() if k in ["T_ratio_i", "T_ratio_f", "T_ratio_max", "m1"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("T_ratio_i", "T_ratio_f", "T_ratio_max", "m1") at index {idx}. Allowed values: 0<v<1.'
 			)
-			assert all([v>=0. for k,v in pars_list[idx].items() if k in ["max_resets", "gamma", "lamda", "bss", "threshold_est", "threshold_adj"]]), (
-			    f'{self.name}._setup(): invalid value for one of the following keys ("max_resets", "gamma", "lamda", "bss", "threshold_est", "threshold_adj") at index {idx}. Allowed values: v>=0.'
+			assert all([v>=0. for k,v in pars_list[idx].items() if k in ["gamma", "lamda", "bss", "threshold_est", "threshold_adj"]]), (
+			    f'{self.name}._setup(): invalid value for one of the following keys ("gamma", "lamda", "bss", "threshold_est", "threshold_adj") at index {idx}. Allowed values: v>=0.'
 			)
 			assert all([v>0. for k,v in pars_list[idx].items() if k in ["stime", "moves", "tot_moves", "T", "dt", "max_extractions", "min_extractions", "max_adj_step", "min_adj_step"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys '
@@ -415,18 +415,19 @@ class PLSampler():
 			grad = self._compute_grad(varpars)
 			if iext == 0:
 				for layer, value in grad.items():
-					sum_grad[layer] = value.detach().clone()
-					sum2_grad[layer] = (value**2.).detach().clone()
+					sum_grad[layer] = value.detach()
+					sum2_grad[layer] = (value**2.).detach()
 			else:
 				for layer, value in grad.items():
-					sum_grad[layer] += value.detach().clone()
-					sum2_grad[layer] += (value**2.).detach().clone()
+					sum_grad[layer] += value.detach()
+					sum2_grad[layer] += (value**2.).detach()
+			del grad
 		
 		tot_extractions = varpars['min_extractions']
 		curr_var = {}
 		for layer in sum_grad:
 			curr_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-			curr_var[layer][curr_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
+			curr_var[layer].clamp_(min=10**varpars["log_zerovar"])
 		if verbose:
 			print(f"First estimate at {tot_extractions} extractions terminated.")
 
@@ -435,17 +436,21 @@ class PLSampler():
 			for _ in range(varpars['min_extractions']):
 				grad = self._compute_grad(varpars)
 				for layer, value in grad.items():
-					sum_grad[layer] += value.detach().clone()
-					sum2_grad[layer] += (value**2.).detach().clone()
+					sum_grad[layer] += value.detach()
+					sum2_grad[layer] += (value**2.).detach()
+				del grad
 			tot_extractions += varpars['min_extractions']
 
 			converged = []
 			next_var = {}
 			for layer, curr_var_l in curr_var.items():
 				next_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-				next_var[layer][next_var[layer] < 10**varpars["log_zerovar"]] = 10**varpars["log_zerovar"]
-				converged.append( 
-						torch.all( abs( torch.sqrt(next_var[layer]/curr_var_l) - 1. ) <= varpars['threshold_est'] ).item()
+				next_var[layer].clamp_(min=10**varpars["log_zerovar"])
+				converged.append(
+					torch.allclose(
+						torch.sqrt(next_var[layer]/curr_var_l), torch.ones_like(curr_var_l),
+						atol=varpars['threshold_est'],
+					)
 				)
 			if verbose:
 				print(f"Further estimate at {tot_extractions} extractions. Converged: {all(converged)} ({sum(converged)}/{len(converged)}).")
@@ -458,84 +463,93 @@ class PLSampler():
 		return curr_var, tot_extractions
 
 	def _update_varpars(self, varpars, momenta=None, verbose=True):
-		print("\n!!! Update of the current mini-batch standard deviations and related parameters !!!\n")
+		print("\n!!! Update of the mini-batch noise variances and all the related parameters !!!\n")
 		curr_var, tot_extractions = self._estimate_var(varpars, verbose)
 
-		# 0. Initiate mini-batch temperatures
+		# 0. Initiate temperatures ratio and weight masses
 		if 'var' not in varpars.keys():
-			varpars['c1'] = math.sqrt(1.-varpars['m1']**2.)
+			print(f"\nInitialization of the temperatures ratios and other parameters.\nThe streak is set to 1.")
+			varpars['streak'] = 1
+			varpars['c1'] = np.sqrt(1.-varpars['m1']**2.).item()
 			varpars['M'], varpars['T_ratio'], varpars['k_wn'] = {}, {}, {}
 			for layer, curr_var_l in curr_var.items():
 				varpars['T_ratio'][layer] = torch.full_like(curr_var_l, varpars['T_ratio_i'])
 				varpars['M'][layer] = curr_var_l*varpars['dt']**2./(4.*varpars['T_ratio_i']*varpars['T']*varpars['m1']**2.)
 				varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
 
-			varpars['streak'] = 1
-			print(f"\nNew set of starting parameters: the streak is {varpars['streak']}.")
-
 		else:
-			idxs = torch.randperm(len(curr_var), device=self.model.device, generator=self.generator.get())
-			perm_layers = [list(curr_var.keys())[idx.item()] for idx in idxs]
-			resets = torch.rand((len(curr_var),), device=self.model.device, generator=self.generator.get()) < varpars["p_reset"]
-
 			keep_streak = True
-			counter = 0
-			for perm_layer, reset in zip(perm_layers, resets):
-				curr_var_pl = curr_var[perm_layer]
-				curr_T_ratio_pl = varpars['T_ratio'][perm_layer] * curr_var_pl/varpars['var'][perm_layer]
-
-				# 1.1 Reset mini-batch temperature to final value
-				if reset and (counter < varpars['max_resets']):
-					varpars['T_ratio'][perm_layer] = torch.full_like(curr_var_pl, varpars['T_ratio_f'])
-					varpars['M'][perm_layer] *= curr_T_ratio_pl/varpars['T_ratio_f']
-					momenta[perm_layer] = torch.randn(momenta[perm_layer].shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][perm_layer])
-					counter += 1
-					print(f"RESET: T_ratios on layer {perm_layer} have been reset to goal (final) value {varpars['T_ratio_f']} (counter={counter}).")
-
-				# 1.2 Standard (controlled) update of the mini-batch temperature
-				else:
-					varpars['T_ratio'][perm_layer] = curr_T_ratio_pl
-
-					mask = curr_T_ratio_pl > varpars['T_ratio_max']
-					if mask.any().item():
-						varpars['T_ratio'][perm_layer][mask] = varpars['T_ratio_max']
-						varpars['M'][perm_layer][mask] *= curr_T_ratio_pl[mask]/varpars['T_ratio_max']
-
-						flat_momenta_pl = momenta[perm_layer].flatten()
-						if varpars["mean"]:
-							repeated_shape = tuple( [1]*varpars["axis"] + list(momenta[perm_layer].shape[varpars["axis"]:]) )
-							repeated_mask = mask.repeat(repeated_shape)
-							flat_M_pl_masked = varpars['M'][perm_layer].repeat(repeated_shape)[repeated_mask].flatten()
-							flat_momenta_pl[ repeated_mask.flatten() ] = torch.randn(repeated_mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*flat_M_pl_masked)
-						else:
-							flat_M_pl_masked = varpars['M'][perm_layer][mask].flatten()
-							flat_momenta_pl[ mask.flatten() ] = torch.randn(mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*flat_M_pl_masked)
-							
-						momenta[perm_layer] = flat_momenta_pl.reshape(momenta[perm_layer].shape)
-						print(f"ALERT: T_ratios on layer {perm_layer} have reached the threshold value {varpars['T_ratio_max']}. Starting the update of the mass matrix M!")
+			reset = torch.rand(1, device=self.model.device, generator=self.generator.get()).item() <= varpars["p_reset"]
+			
+			# 1. Reset temperatures ratio, weight masses and momenta according to the current variances
+			if reset:
+				print(f"\nReset of the temperatures ratios and extraction of new momenta.")
+				for layer, curr_var_l in curr_var.items():
+					varpars['T_ratio'][layer] = torch.full_like(curr_var_l, varpars['T_ratio_f'])
+					varpars['M'][layer] = curr_var_l*varpars['dt']**2./(4.*varpars['T_ratio_f']*varpars['T']*varpars['m1']**2.)
+					varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
+					momenta[layer] = torch.randn(curr_var_l.shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][layer])
+					
+					keep_streak *= torch.allclose(
+						torch.sqrt(curr_var_l/varpars["var"][layer]), torch.ones_like(curr_var_l),
+						atol=varpars['threshold_adj'],
+					)
 				
-				varpars['k_wn'][perm_layer] = torch.sqrt( varpars['M'][perm_layer]*varpars['T']*varpars['m1']**2. - curr_var_pl*(varpars['dt']/2.)**2. )
+			# 2. Standard (controlled) update of the temperatures ratio
+			else:
+				print(f"\nStandard (controlled) update of the temperatures ratios and other parameters.")
+				for layer, curr_var_l in curr_var.items():
+					varpars["T_ratio"][layer] *= curr_var_l/varpars["var"][layer]
+					mask = varpars["T_ratio"][layer] > varpars["T_ratio_max"]
+					if mask.any().item():
+						varpars, momenta, stats = self._increase_masses(varpars, momenta, curr_var_l, mask, layer)
+						print(f"ALERT: {stats['n']} ({100*stats['f']:.1f}%) T_ratios on layer {layer} have reached the threshold value {varpars['T_ratio_max']}. Starting the update of the mass matrix M!")
 
-				# 2. Check streak
-				keep_streak *= torch.all( abs( torch.sqrt(curr_var_pl/varpars["var"][perm_layer]) - 1. ) < varpars['threshold_adj'] ).item()
+					keep_streak *= torch.allclose(
+						torch.sqrt(curr_var_l/varpars["var"][layer]), torch.ones_like(curr_var_l),
+						atol=varpars['threshold_adj'],
+					)
 
 			if keep_streak:
 				varpars['streak'] += 1
-				print(f"\nCompatible current and previous variances: the streak is increased to {varpars['streak']}.")
+				print(f"Compatible current and previous variances: the streak is increased to {varpars['streak']}.")
 			else:
 				varpars['streak'] = 1
-				print(f"\nIncompatible current and previous variances: the streak is set back to {varpars['streak']}.")
+				print(f"Incompatible current and previous variances: the streak is set back to {varpars['streak']}.")
 		
 		varpars['adj_step'] = min([varpars['streak']*varpars['min_adj_step'], varpars['max_adj_step']])
-		print(f"The current adjournment step is {varpars['adj_step']}.")
+		varpars['var'], varpars['tot_extractions'] = wcopy(curr_var), tot_extractions
 		
-		varpars['var'], varpars['tot_extractions'] = curr_var, tot_extractions
-
+		print(f"The current adjournment step is {varpars['adj_step']}.")
 		print(f'Back to the simulation.\n')
 		print(f'// {self.name} status register:')
 		print(f'{self.separator}\n{self.header}\n{self.separator}')
 		return varpars, momenta
-				
+
+	def _increase_masses(self, varpars, momenta, curr_var_l, mask, layer):
+		varpars["T_ratio"][layer][mask] = varpars["T_ratio_max"]
+		varpars["M"][layer][mask] = ( varpars["dt"]**2./(4.*varpars["T"]*varpars["m1"]**2) ) * curr_var_l[mask]/varpars["T_ratio_max"]
+		varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
+
+		momenta_l_shape = list(momenta[layer].shape)
+		flat_momenta_l = momenta[layer].flatten()
+		if varpars["mean"]:
+			axis = varpars["axis"] if varpars["axis"]>=0 else max([len(momenta_l_shape)+varpars["axis"], 0])
+			repeated_shape = tuple( [1]*axis + momenta_l_shape[axis:] )
+			repeated_mask = mask.repeat(repeated_shape)
+			flat_M_l_masked = varpars["M"][layer].repeat(repeated_shape)[repeated_mask].flatten()
+			flat_momenta_l[ repeated_mask.flatten() ] = torch.randn(repeated_mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars["T"]*flat_M_l_masked)
+			n = repeated_mask.sum().item()
+		else:
+			flat_M_l_masked = varpars["M"][layer][mask].flatten()
+			flat_momenta_l[ mask.flatten() ] = torch.randn(mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars["T"]*flat_M_l_masked)
+			n = mask.sum().item()
+		momenta[layer] = flat_momenta_l.reshape(momenta_l_shape)
+
+		N = np.cumprod(momenta_l_shape)[-1].item()
+		stats = {"n":n, "f":n/N}
+		return varpars, momenta, stats
+
 
 
 	def _extend_buffer(self, dikt, header=False):
@@ -605,10 +619,9 @@ class PLSampler():
 		lines.append(f'# moves:                      {pars_idx["moves"]:.1e}')
 		lines.append(f'# temperature:                {pars_idx["T"]:.1e}')
 		lines.append(f'# initial temperatures ratio: {pars_idx["T_ratio_i"]:.1e}')
+		lines.append(f'# reset probability:          {pars_idx["p_reset"]:.2f}')
 		if pars_idx["p_reset"] > 0.:
 			lines.append(f'# final temperatures ratio:   {pars_idx["T_ratio_f"]:.1e}')
-			lines.append(f'# layer reset probability:    {pars_idx["p_reset"]:.2f}')
-			lines.append(f'# maximum number of resets:   {pars_idx["max_resets"]:.0f}')
 		lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
 		lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
 		lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
@@ -641,7 +654,7 @@ class PLSampler():
 		# pars dictionary
 		if dname == "varpars":
 			types_and_keys = [
-					(int,  ['moves', 'tot_moves', 'max_resets', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak', 'log_zerovar']),
+					(int,  ['moves', 'tot_moves', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak', 'log_zerovar']),
 					(bool, ['adj_ref', 'mean']),
 			]
 		# data dictionary
@@ -668,7 +681,6 @@ class PLSampler():
 			"gamma": (0., float),
 			"adj_ref": (1, bool),
 			"p_reset": (0.0, float),
-			"max_resets": (0, int),
 			"dt": (1.0, float),
 			"T_ratio_max": (1.0e-1, float),
 			"mean": (True, bool),
