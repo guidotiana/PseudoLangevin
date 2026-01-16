@@ -488,7 +488,7 @@ class PLSampler():
 					varpars['T_ratio'][layer] = torch.full_like(curr_var_l, varpars['T_ratio_f'])
 					varpars['M'][layer] = curr_var_l*varpars['dt']**2./(4.*varpars['T_ratio_f']*varpars['T']*varpars['m1']**2.)
 					varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
-					momenta[layer] = torch.randn(curr_var_l.shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][layer])
+					momenta[layer] = torch.randn(self.model.weights[layer].shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][layer])
 					
 					keep_streak *= torch.allclose(
 						torch.sqrt(curr_var_l/varpars["var"][layer]), torch.ones_like(curr_var_l),
