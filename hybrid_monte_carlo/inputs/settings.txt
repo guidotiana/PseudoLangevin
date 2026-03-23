@@ -1,0 +1,9 @@
+# sampler settings
+
+results_dir results		#results directory
+data_step   1			#number of moves after which to save sampling data
+log_step    100			#number of moves after which to save checkpoint (log) of the simulation
+print_step  100			#number of moves after which to print the system status
+restart     1			#boolean variable, whether to restart or not the previous simulation, 1 riparto da dove sono arrivato, 0 parto da zero
+device      cuda:0		#device on which to load weights and data
+num_threads 1			#maximum number of threads
