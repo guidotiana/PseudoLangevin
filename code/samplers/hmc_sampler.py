@@ -4,7 +4,6 @@ from io import StringIO
 from time import process_time as ptime
 from collections.abc import Callable
 
-import math
 import torch
 import numpy as np
 
@@ -300,7 +299,7 @@ class HMCSampler():
 
 	def _init_momenta(self, pars):
 		momenta = {
-				layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get()) * math.sqrt(pars['T']*pars['M'])
+				layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get()) * np.sqrt(pars['T']*pars['M'])
 				for layer, values in self.model.weights.items()
 		}
 		return momenta

@@ -1,8 +1,6 @@
-import os
 import torch
-from torch.utils.data import TensorDataset, Dataset
+from torch.utils.data import Dataset
 
-CWD = "/home/alessandroz/workspace/PseudoLangevin/code/datasets/FashionMNIST"
 P_TRAIN = 60000
 P_TEST  = 10000
 
@@ -10,7 +8,7 @@ P_TEST  = 10000
 # Load projected FashionMNIST data
 def load_data(which):
 	assert which in ["train", "test"], f"load(): unexpected value of the inputted 'which' variable ({which}). Allowed values: 'train', 'test'."
-	x, y = torch.load(f"{CWD}/fashion_{which}_100.pt", weights_only=True)
+	x, y = torch.load(f"fashion_{which}_100.pt", weights_only=True)
 	return x, y
 
 

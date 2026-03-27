@@ -1,14 +1,13 @@
 import torch
-import torch.nn as nn
 from copy import deepcopy
 
 
-class NNModel(nn.Module):
+class NNModel(torch.nn.Module):
 
     # Initialization of the neural network (NN) model
     def __init__(
         self,
-        NN: nn.Module,
+        NN: torch.nn.Module,
         device: str | torch.device ='cpu',
         f: str | None = None,
     ):
