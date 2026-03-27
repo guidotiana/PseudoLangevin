@@ -5,6 +5,7 @@ This repository contains the data, code, and usage templates associated with our
 
 
 <details open><summary><b>Table of contents</b></summary>
+
 - [Code](#code)
   - [Samplers](#samplers)
   - [Models](#models)
@@ -19,14 +20,14 @@ This repository contains the data, code, and usage templates associated with our
 </details>
 
 
-
+---
 ## Code <a name="code"></a>
 
 The `code/` directory is the core of this repository, as it contains the implementation of the sampling algorithms used in [PAPER](http://arxiv.org/abs/2603.15367).
 
 ### samplers/ <a name="samplers"></a>
-- `pl_sampler.py`: it contains the implementation of the pseudo-Langevin (pL) sampling method as the python class `PLSampler`. For usage examples, see [templates](pseudoLangevin).
-- `hmc_sampler.py`: it contains the implementation of the hybrid Monte Carlo (hMC) algorithm as the python class `HMCSampler`. For usage examples, see [templates](hybridMonteCarlo). 
+- `pl_sampler.py`: it contains the implementation of the pseudo-Langevin (pL) sampling method as the python class `PLSampler`. For usage examples, see [pL templates](pseudoLangevin).
+- `hmc_sampler.py`: it contains the implementation of the hybrid Monte Carlo (hMC) algorithm as the python class `HMCSampler`. For usage examples, see [hMC templates](hybridMonteCarlo). 
 - `suboptimal/`: it contains sub-optimal variants of the pL and hMC algorithms.
 
 ### models/ <a name="models"></a>
@@ -45,7 +46,7 @@ The `code/` directory is the core of this repository, as it contains the impleme
 - `operations.py`: it contains functions which perform operations on neural network model weights, dictionaries and floats.
 
 
-
+---
 ## Usage templates <a name="usage"></a>
 Here are provided a few examples on how to use the implementation of the pseudo-Langevin and of the hybrid Monte Carlo algorithms.
 
@@ -54,11 +55,11 @@ Here are provided a few examples on how to use the implementation of the pseudo-
 ### hybrid Monte Carlo <a name="#hybridMonteCarlo"></a>
 
 
-
+---
 ## Article data <a name="article_data"></a>
 
 
-
+---
 ## Contacts <a name="contacts"></a>
 
 
