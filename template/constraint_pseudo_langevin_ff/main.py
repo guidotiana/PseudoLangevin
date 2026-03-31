@@ -10,7 +10,7 @@ from datasets.sequences_dataset import load_seq, MaskedDataset
 from generator.custom_generator import CustomGenerator
 from utils.general import load_stuff, load_inputs, create_path, find_path
 from utils.energies import choose_cost, choose_metric
-from models.ff.layers import Model, FF
+from models.pooling_ff.layers import Model, FF
 from samplers.cpl_sampler import ConstraintPLSampler
 from models.nnmodel import NNModel
 
