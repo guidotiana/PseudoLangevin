@@ -40,11 +40,11 @@ class FeedForward(nn.Module):
 	
 	def forward(self, x):
         # x: (B, n, 2d)	
-		h = self.W1(x)                      
+		h = self.W1(x)                       # (B, n, m)
 		return F.relu(self.W2(F.relu(h) + self.PE_FF(h)))
 
 class FF(nn.Module):
-	def __init__(self, vocab_size, d, m, n, device, dropout=0.1):
+	def __init__(self, vocab_size, d, m, n, device, mask_id = None, dropout=0.1):
 		super(FF, self).__init__()
 		self.token_embedding = Embedding(vocab_size, d)
 		self.positional_encoding = PositionalEncoding(d, n, device)
@@ -55,10 +55,16 @@ class FF(nn.Module):
 		self.dropout1 = nn.Dropout(dropout)
 		self.dropout2 = nn.Dropout(dropout)
 		self.linear = nn.Linear(d, m)
+		self.mask_id = mask_id
 
-	def forward(self, x, mask=None):
-		
-		x = x.to(self.device)
+	def forward(self, x):
+
+		token_ids = x  
+
+		if self.mask_id is None:
+			mask = None
+		else:
+			mask = (token_ids == self.mask_id)
 
         # embedding + PE
 		x = self.token_embedding(x) + self.positional_encoding(x)  # (B, n, d)
@@ -69,9 +75,9 @@ class FF(nn.Module):
 		if mask is None:
 			visible = torch.ones(x.size(0), x.size(1), device=x.device, dtype=torch.bool)
 		else:
-			visible = (~mask).to(x.device) 
-
-		visible_f = visible.float().unsqueeze(-1)                  # (B, n, 1)
+			visible = (~mask).to(x.device)  
+        
+        visible_f = visible.float().unsqueeze(-1)                  # (B, n, 1)
 
 		sum_x = (x * visible_f).sum(dim=1)                         # (B, d)
 		denom = visible_f.sum(dim=1).clamp(min=1.0)                # (B, 1)
@@ -94,7 +100,7 @@ class Model(nn.Module):
 		self.linear = nn.Linear(m, vocab_size)
 		self.device = device
 	
-	def forward(self, x, mask=None):
-		x = self.ff(x, mask)
+	def forward(self, x):
+		x = self.ff(x)
 		return self.linear(x)
 

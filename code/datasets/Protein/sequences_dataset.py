@@ -59,38 +59,3 @@ class MaskedDataset(Dataset):
 		if ("cuda" in device.type) and torch.cuda.is_available():
 			self.x = self.x.to(device)
 			self.y = [torch.tensor(a, device=device) for a in self.y]
-
-
-
-## FEED FORWARD
-
-
-def to_one_hot(sequences, vocab_size):
-	
-	batch_size = len(sequences)
-	seq_len = len(sequences[0])
-	one_hot = torch.zeros((batch_size, seq_len, vocab_size))
-	
-	for i, seq in enumerate(sequences):
-		for j, token in enumerate(seq):
-			if 0 <= token < vocab_size:
-				one_hot[i, j, token] = 1.0
-	return one_hot
-
-
-
-
-class OneHotSequenceDataset(Dataset):
-	def __init__(self, input_ids, labels, vocab_size):
-		self.input_onehot = to_one_hot(input_ids, vocab_size)
-		self.labels = labels #torch.tensor()
-
-	def __len__(self):
-		return len(self.input_onehot)
-
-	def __getitem__(self, idx):
-		return {
-			'input': self.input_onehot[idx],     # (seq_len, vocab_size)
-			'label': self.labels[idx]            # (seq_len,)
-		}
-
