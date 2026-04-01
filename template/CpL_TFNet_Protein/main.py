@@ -7,20 +7,21 @@ torch.cuda.empty_cache()
 sys.path.append('../../code')
 from models.nnmodel import NNModel
 from models.transformer.transformer import Transformer, TFNet
-from datasets.Protein.protein_dataset import load_datasets
+from datasets.Protein.protein_dataset import load_datasets, VOCAB_SIZE, MASK_ID
 from samplers.cpl_sampler import ConstrainedPLSampler
 from utils.general import load_inputs, create_path, find_path
 
 # Load the input files and make the results directory
 def prepare_directory(args):
-	pars = {key: load_inputs(args.pars_file, start=f"## {key}", end="##") for key in ["model", "sampler", "dataset"]}
+	pars = {key: load_inputs(args.pars_file, start=f"## {key}", end="##") for key in ["model", "sampler", "data"]}
+	pars['data']['filename'] = '../../code/datasets/Protein/SequencesMasked.txt'
 	settings = load_inputs(args.settings_file)
 
 	create_path(settings['results_dir'])
 	settings['results_dir'] = find_path(raw_path=settings['results_dir'], dname='sim', pfile=args.pars_file, pname='pars.txt', lpfunc=load_inputs)
 	if 'weights_dir' not in settings.keys():
 		settings['weights_dir'] = f"{settings['results_dir']}/weights"
-		create_path(settings['weights_dir'])
+	create_path(settings['weights_dir'])
 
 	return pars, settings
 
@@ -47,7 +48,7 @@ def main(args):
 
 	print('Defining cost and metric functions...')
 	def Cost(fx, masks):
-		log_probs = F.log_softmax(fx, dim= -1)
+		log_probs = F.log_softmax(fx, dim=-1)
 		costs = [
 			log_probs[iseq, mask[:,0], mask[:,1]].mean() if len(mask)>0 else torch.tensor(0)
 			for iseq, mask in enumerate(masks)
@@ -55,7 +56,7 @@ def main(args):
 		return sum(costs) / len(masks)
 
 	def Metric(fx, masks):
-		softmax_fx = F.softmax(fx, dim= -1)
+		softmax_fx = F.softmax(fx, dim=-1)
 		total_mean = 0.0
 		for iseq, mask in enumerate(masks):
 			count = 0.

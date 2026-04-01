@@ -20,7 +20,7 @@ def prepare_directory(args):
 	settings['results_dir'] = find_path(raw_path=settings['results_dir'], dname='sim', pfile=args.pars_file, pname='pars.txt', lpfunc=load_inputs)
 	if 'weights_dir' not in settings.keys():
 		settings['weights_dir'] = f"{settings['results_dir']}/weights"
-		create_path(settings['weights_dir'])
+	create_path(settings['weights_dir'])
 
 	return pars, settings
 

@@ -20,7 +20,7 @@ def prepare_directory(args):
 	settings['results_dir'] = find_path(raw_path=settings['results_dir'], dname='sim', pfile=args.pars_file, pname='pars.txt', lpfunc=load_inputs)
 	if 'weights_dir' not in settings.keys():
 		settings['weights_dir'] = f"{settings['results_dir']}/weights"
-		create_path(settings['weights_dir'])
+	create_path(settings['weights_dir'])
 
 	return pars, settings
 
@@ -46,7 +46,7 @@ def main(args):
 
 	print('Defining cost and metric functions...')
 	Cost = lambda logits, target: F.cross_entropy(logits, target)
-	Metric = lambda logits, target: (logits.argmax(dim=1) == target).float().mean()
+	Metric = lambda logits, target: 1. - (logits.argmax(dim=1) == target).float().mean()
 
 	print('Initializing sampler...')
 	sampler = PLSampler(

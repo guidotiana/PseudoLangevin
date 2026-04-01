@@ -89,11 +89,11 @@ class ConstrainedPLSampler():
 		# First inputted settings are controlled and completed. Then, data, log and print steps are rounded to be divisible.
 		# Finally threads and devices are set. Once the device is defined, the model, the data and the generator are loaded on the correct device.
 		if settings is None:
-            settings = {}
-        else:
-            assert is_subset(settings.keys(), self.defsettings.keys()), f"{self.name}._setup(): unexpected key in inputted settings dictionary. Expected keys are: {list(self.defsettings.keys())}."
+			settings = {}
+		else:
+			assert is_subset(settings.keys(), self.defsettings.keys()), f"{self.name}._setup(): unexpected key in inputted settings dictionary. Expected keys are: {list(self.defsettings.keys())}."
 		
-        for key, (value, typ) in self.defsettings.items():
+		for key, (value, typ) in self.defsettings.items():
 			if key not in settings:
 				settings[key] = value
 				if key in ["results_dir", "weights_dir"]:
@@ -315,7 +315,7 @@ class ConstrainedPLSampler():
 			old_grad = self._compute_grad(varpars)
 			old_noise = self._generate_noise()
 
-			S1, S2, S3 = 0., 0., 0.
+			S_1, S_2, S_3 = 0., 0., 0.
 			with torch.no_grad():
 				for layer in self.model.weights:
 					vvd = momenta[layer]*varpars['c1']*varpars['dt']/varpars['M'][layer] - old_grad[layer]*varpars['dt']**2./(2.*varpars['M'][layer])
@@ -327,11 +327,13 @@ class ConstrainedPLSampler():
 					S_3 += ((old_weights[layer]/varpars['M'][layer])**2).sum().item()
 
 			delta = S_1**2 + self._Q*S_3 - S_3*S_2
-            lamda_1 = (-S_1 + np.sqrt(delta)) / (varpars['dt']**2 * S_3)
-            lamda_2 = (-S_1 - np.sqrt(delta)) / (varpars['dt']**2 * S_3)
-            lamda = lamda_1 if abs(lamda_1)<abs(lamda_2) else lamda_2
-            for layer in self.model.weights:
-                self.model.weights[layer] += varpars['dt']**2/varpars['M'][layer]*lamda*old_weights[layer]
+			assert delta>=0, "{self.name}._integrate(): bad integration caused delta<0. Check your simulation parameters and lower your T_ratios."
+			lamda_1 = (-S_1 + np.sqrt(delta)) / (varpars['dt']**2 * S_3)
+			lamda_2 = (-S_1 - np.sqrt(delta)) / (varpars['dt']**2 * S_3)
+			lamda = lamda_1 if abs(lamda_1)<abs(lamda_2) else lamda_2
+			with torch.no_grad():
+				for layer in self.model.weights:
+					self.model.weights[layer] += varpars['dt']**2/varpars['M'][layer]*lamda*old_weights[layer]
 
 			new_grad = self._compute_grad(varpars)
 			new_noise = self._generate_noise()
@@ -347,8 +349,9 @@ class ConstrainedPLSampler():
 					S_5 += (self.model.weights[layer]**2/varpars['M'][layer]).sum()
             
 			Lamda = - S_4 / (S_5*varpars['dt']*varpars['c1'])
-            for layer in self.model.weights:
-                momenta[layer] -= varpars['c1']*varpars['dt']*self.model.weights[layer]*Lamda
+			with torch.no_grad():
+				for layer in self.model.weights:
+					momenta[layer] -= varpars['c1']*varpars['dt']*self.model.weights[layer]*Lamda
 
 			if step<steps:
 				old_weights = self.model.copy()
@@ -445,10 +448,10 @@ class ConstrainedPLSampler():
 			for layer, values in self.model.weights.items()
 		}
 
-	def _orthogonalize_momenta(momenta, varpars):
+	def _orthogonalize_momenta(self, momenta, varpars):
 		with torch.no_grad():
-            for layer in self.model.weights:
-                momenta[layer] -= (momenta[layer]*self.model.weights[layer]/varpars['M'][layer]).sum() * self.model.weights[layer]*varpars['M'][layer] / self._Q
+			for layer in self.model.weights:
+				momenta[layer] -= (momenta[layer]*self.model.weights[layer]/varpars['M'][layer]).sum() * self.model.weights[layer]*varpars['M'][layer] / self._Q
 		return momenta
 
 
@@ -624,7 +627,7 @@ class ConstrainedPLSampler():
 			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
 		}
 		for key in ["weights", "momenta", "varpars"]:
-			names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt',
+			files_log_names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt'
         
 		self.model.save(files_log_names["weights"])
 		self.generator.save(files_log_names["generator"])

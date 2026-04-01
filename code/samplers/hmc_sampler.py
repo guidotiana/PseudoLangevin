@@ -403,25 +403,25 @@ class HMCSampler():
 		self.buffer.truncate(0)
 
 	def _save_log(self, data, settings, is_ref=False):
-        self._flush_buffer(settings)
+		self._flush_buffer(settings)
 
-        files_log_names = {
-            "weights": f'{settings["weights_dir"]}/weights_{data["move"]}.pt' if settings[f"save_weights"] else f'{settings["weights_dir"]}/weights.pt',
-            "generator": f'{settings["results_dir"]}/generator.npy',
-            "weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
-        }
+		files_log_names = {
+			"weights": f'{settings["weights_dir"]}/weights_{data["move"]}.pt' if settings[f"save_weights"] else f'{settings["weights_dir"]}/weights.pt',
+			"generator": f'{settings["results_dir"]}/generator.npy',
+			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
+		}
 
-        self.model.save(files_log_names["weights"])
-        self.generator.save(files_log_names["generator"])
-        if is_ref:
-            self.model.save(files_log_names["weights_ref"])
+		self.model.save(files_log_names["weights"])
+		self.generator.save(files_log_names["generator"])
+		if is_ref:
+			self.model.save(files_log_names["weights_ref"])
 
-        self.log = {
-            "data": data.copy(),
-            "files": files_log_names.copy(),
-        }
+		self.log = {
+			"data": data.copy(),
+			"files": files_log_names.copy(),
+		}
 
-        torch.save(self.log, f'{settings["results_dir"]}/log.pt')
+		torch.save(self.log, f'{settings["results_dir"]}/log.pt')
 
 	def _print_status(self, data, header=False):
 		if header:
@@ -463,7 +463,7 @@ class HMCSampler():
 		lines.append(f'# ')
 		lines.append(f'# results directory: {settings["results_dir"]}')
 		lines.append(f'# weights directory: {settings["weights_dir"]}')
-        lines.append(f'# save all weights:  {settings["save_weights"]}')
+		lines.append(f'# save all weights:  {settings["save_weights"]}')
 		if idx == 0:
 			lines.append(f'# restart:           {bool(settings["restart"])}')
 		lines.append(f'# ')

@@ -9,7 +9,7 @@ n               86				#length of the sequences
 from            None			#path to the .pt file containing the starting weights. If None, gaussian initialization of the weights (default: None)
 
 
-## dataset
+## data
 P_train         1_000			#number of examples in the training set
 P_val           0				#number of examples in the validation set (default: 0)
 P_test          0				#number of examples in the test set (default: 0)
@@ -19,14 +19,14 @@ seed            0				#random-number generator for dataset sequences definition
 ## sampler
 stime           1.0e+4			#simulated time, equal to the number of moves (or integrations) times the integration time step
 T               1.1e-4			#sampled temperature
-T_ratio_i       1.0e-2			#initial temperatures ratio (default: 0.01)
+T_ratio_i       5.0e-8			#initial temperatures ratio (default: 0.01)
 m1              0.1				#m1^2=1-c1^2, where c1 represents the viscosity of the medium (default: 0.1)
 gamma           0.0				#harmonic constant of the quadratic term computed with respect to the simulation starting weight vector added on top of the cost function (default: 0.0)
 dt              1.0				#integration time step (default: 1.0)
 p_reset         0.1				#probability of re-setting all the temperatures ratios to <T_ratio_f> during each update (default: 0.1).
 								#If the reset is carried out, masses are re-computed and momenta are re-extracted.
-T_ratio_f       1.0e-2			#temperatures ratio manually set during each update with probability <p_reset> for each component of the network parameters (default: <T_ratio_i>)
-T_ratio_max     1.0e-2			#temperatures ratios maximum value (default: <T_ratio_i>).
+T_ratio_f       5.0e-8			#temperatures ratio manually set during each update with probability <p_reset> for each component of the network parameters (default: <T_ratio_i>)
+T_ratio_max     5.0e-8			#temperatures ratios maximum value (default: <T_ratio_i>).
 								#If a temperatures ratio exceeds this limit, the associated component mass is re-computed and its momentum re-extracted (as during the reset).
 mean            0				#boolean variable, whether or not to average the mini-batch gradient variances tensor after <axis> (default: False)
 axis            0				#the axis after which the mini-batch gradient variances tensor of each layer are averaged into a single value (default: 0)
@@ -36,7 +36,7 @@ max_extractions 1000			#maximum number of mini-batch extractions during estimate
 min_extractions 100				#minimum number of mini-batch extractions added to improve the estimate of the mini-bath gradient variances (default: 100)
 threshold_est   0.1				#threshold relative error between the last and the current estimate of the mini-bath gradient variances accepted for convergence (default: 0.1)
 max_adj_step    50000			#maximum number of integration steps after which the mini-bath gradient variances are adjourned, along with the temperatures ratios (default: 5_000)
-min_adj_step    2500			#minimum number of integration steps after which the mini-bath gradient variances are adjourned, along with the temperatures ratios (default: 100_000)
+min_adj_step    1000			#minimum number of integration steps after which the mini-bath gradient variances are adjourned, along with the temperatures ratios (default: 100_000)
 threshold_adj   0.1				#threshold relative error between the previous and the current mini-bath gradient variances matrix accepted for an increase in the update interval <adj_step> (default: 0.1)
 log_zerovar     -8				#base-10 logarithm of the minimum value for the mini-batch gradient variances. Lower values are considered as 0 (default: -8)
 seed            0				#custom pytorch random-number generator seed (default: 0)

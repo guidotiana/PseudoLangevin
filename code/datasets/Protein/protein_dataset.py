@@ -28,9 +28,9 @@ def load_seq(filename="SequencesMasked.txt", n=None):
 
 def load_datasets(P_train, P_val=0, P_test=0, seed=0, device="cpu", filename="SequencesMasked.txt", n=None):
 	assert P_train>0, f"load_datasets(): invalid value for 'P_train' ({P_train}). It must be positive, P_train>0."
-    assert P_val>0, f"load_datasets(): invalid value for 'P_val' ({P_val}). It must be non-negative, P_val>=0."
-	assert P_test>0, f"load_datasets(): invalid value for 'P_test' ({P_test}). It must be non-negative, P_test>=0."
-	assert P_train+P_val+P_test<=P_max, f"load_datasets(): invalid values for 'P_train' ({P_train}), 'P_val' ({P_val}), and P_test ({P_test}). The sum must not exceed {P_max}."
+	assert P_val>=0, f"load_datasets(): invalid value for 'P_val' ({P_val}). It must be non-negative, P_val>=0."
+	assert P_test>=0, f"load_datasets(): invalid value for 'P_test' ({P_test}). It must be non-negative, P_test>=0."
+	assert P_train+P_val+P_test<=P_MAX, f"load_datasets(): invalid values for 'P_train' ({P_train}), 'P_val' ({P_val}), and P_test ({P_test}). The sum must not exceed {P_MAX}."
 
 	masked_sequences_ohe, sequences_ohe, masks = load_seq(filename, n)
 	masked_sequences_ohe = torch.tensor(masked_sequences_ohe)
@@ -85,7 +85,7 @@ class MaskedDataset(Dataset):
 		return self.P
 
 	def __getitem__(self, idx):
-		return self.x[idx], [array for array, flag in zip(self.y, idx) if flag], idx
+		return self.x[idx], [array for array, flag in zip(self.y, idx) if flag]
 
 	def to(self, device):
 		device = device if isinstance(device, torch.device) else torch.device(device)

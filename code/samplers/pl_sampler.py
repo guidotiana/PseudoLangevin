@@ -89,11 +89,11 @@ class PLSampler():
 		# First inputted settings are controlled and completed. Then, data, log and print steps are rounded to be divisible.
 		# Finally threads and devices are set. Once the device is defined, the model, the data and the generator are loaded on the correct device.
 		if settings is None:
-            settings = {}
-        else:
-            assert is_subset(settings.keys(), self.defsettings.keys()), f"{self.name}._setup(): unexpected key in inputted settings dictionary. Expected keys are: {list(self.defsettings.keys())}."
+			settings = {}
+		else:
+			assert is_subset(settings.keys(), self.defsettings.keys()), f"{self.name}._setup(): unexpected key in inputted settings dictionary. Expected keys are: {list(self.defsettings.keys())}."
 		
-        for key, (value, typ) in self.defsettings.items():
+		for key, (value, typ) in self.defsettings.items():
 			if key not in settings:
 				settings[key] = value
 				if key in ["results_dir", "weights_dir"]:
@@ -594,7 +594,7 @@ class PLSampler():
 			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
 		}
 		for key in ["weights", "momenta", "varpars"]:
-			names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt',
+			files_log_names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt'
         
 		self.model.save(files_log_names["weights"])
 		self.generator.save(files_log_names["generator"])
