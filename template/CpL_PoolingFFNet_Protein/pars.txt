@@ -1,0 +1,38 @@
+# main inputs
+
+## model
+from        #path to the .pt file containing the starting weights
+d 20        #embedding size
+m 320       #number of neurons of FFNN
+n 86        #length of sequence
+
+
+## dataset
+filename ../../code/datasets/Protein/SequencesMasked.txt       #file containing the data
+n_data 2000                                     #total number of data points
+validation_rate 0.5                             #fraction of validation data compared n_data
+
+
+## sampler
+stime      2e6         #list of simulated times (moves=stime/dt)
+T          2.3e-5      #list of sampled temperatures
+T_ratio_i  5.0e-4      #list of starting ratios between the sampled temperatures and the mini-batch effective temperatures
+T_ratio_f  1.0e-1      #list of final ratios between the sampled temperatures and the mini-batch effective temperatures (used during the resets)
+m1         0.2         #list of mobilities to compute the correct mass of the system (where mobility^2+inertia^2=1, with 0<mobility<1)
+gamma      0.          #list of parabolic terms between the current weights configuration and the reference weights vector
+adj_ref    1           #list of boolean variables, whether to considere as reference weights the current weights vector at the start of each simulation with a new set of parameters
+p_reset    0.0         #list of the probabilities of the reset of the minibatch temperatures in each layer
+max_resets 1           #list of the maximum number of resets when updating the variances and related parameters
+dt         1.0e-3      #list of single-integration time steps
+
+T_ratio_max 5.0e-1      #maximum value for the ratio between mini-batch and sampled temperatures, after which the mass matrix (and consequently the momenta) start to get updated in its place
+mean 1                  #boolean variable, whether to use (1, default) or not (0) the mean variance for each layer when computing the noise induced by mini-batch extraction
+axis 0                  #the starting axis along which to compute the mean (if mean==1), that is axis=(axis, ..., ndim). axis==0 means per-layer description of the variances.
+mbs 64                  #mini-batch size employed for the computation of the gradients during the dynamics
+max_extractions 5000    #maximum number of mini-batch extractions during estimate of var
+min_extractions 200     #minimum number of mini-batch extractions added to improve the estimate of var
+threshold_est 0.01      #threshold for convergence of the var estimate
+max_adj_step 50000      #maximum number of steps after which var is adjourned
+min_adj_step 1000       #minimum number of steps after which var is adjourned
+threshold_adj 0.05      #threshold for keeping the streak during var adjournment
+seed 7

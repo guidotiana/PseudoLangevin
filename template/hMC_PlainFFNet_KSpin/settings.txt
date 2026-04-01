@@ -1,0 +1,11 @@
+# sampler settings
+
+results_dir  results			#results directory, for data and log files (default: "./results")
+weights_dir  results/weights	#weights directory, for weight, momenta and varpars files (default: "./results/weights")
+save_weights 1					#boolean variable, whether to save or not weights at each saving step (default: True). If False, weights are overwritten at each saving step.
+data_step    1					#number of moves after which to save sampling data (default: 1)
+log_step     1					#number of moves after which to save the log file (that is, the checkpoint) of the simulation (default: 1)
+print_step   1					#number of moves after which to print the system status (default: 1)
+restart      0                  #boolean variable, whether to restart or not the previous simulation (default: False)
+device       cpu                #device on which to load weights and data (default: "cpu")
+num_threads  1                  #maximum number of threads (default: 1)

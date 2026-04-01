@@ -1,0 +1,10 @@
+# sampler settings
+
+results_dir results		#results directory
+data_step 50			#number of moves after which to save sampling data
+log_step 5000			#number of moves after which to save checkpoint (log) of the simulation
+print_step 50			#number of moves after which to print the system status
+verbose 1				#boolean variable, whether to show the values of the new stds during the update (1, default) or not (0)
+restart 1				#boolean variable, whether to restart or not the previous simulation
+device cuda:0			#device on which to load weights and data
+num_threads 1			#maximum number of threads
