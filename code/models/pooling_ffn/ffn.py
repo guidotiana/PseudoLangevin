@@ -94,11 +94,10 @@ class FF(nn.Module):
 
 
 class PoolingFFNet(nn.Module):
-	def __init__(self, ff, m, vocab_size, device):
+	def __init__(self, ff, m, vocab_size):
 		super().__init__()
 		self.ff = ff
 		self.linear = nn.Linear(m, vocab_size)
-		self.device = device
 	
 	def forward(self, x):
 		x = self.ff(x)

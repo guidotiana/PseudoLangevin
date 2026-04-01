@@ -731,7 +731,7 @@ class PLSampler():
 			"data_step": (1000, int),
 			"log_step": (10000, int),
 			"print_step": (1000, int),
-			"step_scale": (100, int),
+			"step_scale": (1, int),
 			"verbose": (True, bool),
 			"restart": (False, bool),
 			"device": ("cpu", str),

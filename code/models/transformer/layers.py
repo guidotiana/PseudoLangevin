@@ -15,11 +15,11 @@ class Embedding(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-	def __init__(self, d, n, device):
+	def __init__(self, d, n):
 		super(PositionalEncoding, self).__init__()
-		self.register_buffer("encoding", torch.zeros(n, d, device=device))
-		position = torch.arange(0, n, dtype=torch.float, device=device).unsqueeze(1)
-		div_term = torch.exp(torch.arange(0, d, 2, dtype=torch.float, device=device) * (-torch.log(torch.tensor(10000.0, device=device)) / d))
+		self.register_buffer("encoding", torch.zeros(n, d))
+		position = torch.arange(0, n, dtype=torch.float).unsqueeze(1)
+		div_term = torch.exp(torch.arange(0, d, 2, dtype=torch.float) * (-torch.log(torch.tensor(10000.0)) / d))
 		self.encoding[:, 0::2] = torch.sin(position * div_term)#.to(float())
 		self.encoding[:, 1::2] = torch.cos(position * div_term)#.to(float())
 		self.encoding = self.encoding.unsqueeze(0)
@@ -69,23 +69,23 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-	def __init__(self, d, m, n, device):
+	def __init__(self, d, m, n):
 		super(FeedForward, self).__init__()
 		self.W1 = nn.Linear(d, m)
 		self.W2 = nn.Linear(m, d)
-		self.PE_FF = PositionalEncoding(m, n, device)
+		self.PE_FF = PositionalEncoding(m, n)
 	def forward(self, x):
 		return self.W2(F.relu(self.W1(x)) + self.PE_FF(self.W1(x))) # add PE to remove symmetry
 
 
 
 class TransformerBlock(nn.Module):
-	def __init__(self, d, H, m, n, device, dropout=0.1):
+	def __init__(self, d, H, m, n, dropout=0.1):
 		super(TransformerBlock, self).__init__()
 		self.attention = MultiHeadAttention(d, H)
 		self.norm1 = nn.LayerNorm(d)
 		self.norm2 = nn.LayerNorm(d)
-		self.ff = FeedForward(d, m, n, device)
+		self.ff = FeedForward(d, m, n)
 		self.dropout = nn.Dropout(dropout)
 
 	def forward(self, x, mask):

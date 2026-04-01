@@ -455,6 +455,8 @@ class HMCSampler():
 		lines.append(f'# temperature:                {pars["T"]:.1e}')
 		lines.append(f'# integration time step:      {pars["dt"]:.1e}')
 		lines.append(f'# per-move integration steps: {pars["isteps"]:.0f}')
+		lines.append(f'# lamda:                      {pars["lamda"]:.1e}')
+		lines.append(f'# gamma:                      {pars["gamma"]:.1e}')
 		lines.append(f'# weights mass:               {pars["M"]:.2f}')
 		lines.append(f'# ')
 		lines.append(f'# fixed layers: {fixed}')

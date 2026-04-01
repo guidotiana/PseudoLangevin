@@ -1,10 +1,14 @@
 # sampler settings
 
-results_dir results		#results directory
-data_step 50			#number of moves after which to save sampling data
-log_step 5000			#number of moves after which to save checkpoint (log) of the simulation
-print_step 50			#number of moves after which to print the system status
-verbose 1				#boolean variable, whether to show the values of the new stds during the update (1, default) or not (0)
-restart 1				#boolean variable, whether to restart or not the previous simulation
-device cuda:0			#device on which to load weights and data
-num_threads 1			#maximum number of threads
+results_dir  results			#results directory, for data and log files (default: "./results")
+weights_dir  results/weights	#weights directory, for weight, momenta and varpars files (default: "./results/weights")
+save_weights 1					#boolean variable, whether to save or not weights at each saving step (default: True). If False, weights are overwritten at each saving step.
+save_momenta 1					#boolean variable, whether to save or not momenta at each saving step (default: True). If False, momenta are overwritten at each saving step.
+save_varpars 1					#boolean variable, whether to save or not varpars at each saving step (default: True). If False, varpars are overwritten at each saving step.
+data_step    100				#number of moves after which to save sampling data (default: 1000)
+log_step     5000				#number of moves after which to save the log file (that is, the checkpoint) of the simulation (default: 10000)
+print_step   100				#number of moves after which to print the system status (default: 1000)
+verbose      1					#boolean variable, whether to show if the variance estimation process is converging or not (default: True)
+restart      0					#boolean variable, whether to restart or not the previous simulation (default: False)
+device       cpu				#device on which to load weights and data (default: "cpu")
+num_threads  1					#maximum number of threads (default: 1)
