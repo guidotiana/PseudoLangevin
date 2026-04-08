@@ -95,7 +95,8 @@ Now you can choose one of the algorithms present in the `samplers/` directory. A
 ```python
 from samplers.pl_sampler import PLSampler
 
-# Initiate the PLSampler class with the NNModel, the datasets, and the Cost and Metric functions you previously defined.
+# Initiate the PLSampler class with the NNModel, the datasets,
+# and the Cost and Metric functions you previously defined.
 sampler = PLSampler(
         model=model,
 		datasets=datasets,
@@ -105,14 +106,15 @@ sampler = PLSampler(
 
 # Define the parameters dictionary "pars" for the sampling.
 pars = {
-        "stime": 10_000,        #the total simulated time, i.e., the number of moves "moves" times the integration time step "dt" (default, dt=1.0)
+        "stime": 10_000,        #the total simulated time, i.e., the number of moves times the integration time step
 		"T": 1.0e-6,            #the temperature of the sampling
 		"T_ratio_i": 0.01,      #the initial temperatures ratio applied to each parameter of the network
-		"mbs": 512,             #the mini-batch size used for integration
+		"mbs": 512,             #the size of the mini-batches used for integration
 		"min_adj_step": 1_000,  #the number of steps after which the mini-batch gradient variances are updated
 }
 
-# Eventually, add an optional dictionary "settings", containing other variables that do not influence the sampling.
+# Eventually, add an optional dictionary "settings",
+# containing other variables that do not influence the sampling.
 settings = {
 	    "results_dir": "./pL_results",  #results directory
 	    "device": "cuda",               #device for the simulation
