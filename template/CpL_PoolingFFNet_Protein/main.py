@@ -51,7 +51,7 @@ def main(args):
 			log_probs[iseq, mask[:,0], mask[:,1]].mean() if len(mask)>0 else torch.tensor(0)
 			for iseq, mask in enumerate(masks)
 		]
-		return 1 - sum(costs) / len(masks)
+		return - sum(costs) / len(masks)
 
 	def Metric(fx, masks):
 		softmax_fx = F.softmax(fx, dim= -1)
