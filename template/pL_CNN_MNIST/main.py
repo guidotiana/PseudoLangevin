@@ -5,16 +5,19 @@ import torch.nn.functional as F
 torch.cuda.empty_cache()
 
 sys.path.append('../../code')
-from datasets.KSpin.kspin_dataset import generate_kspin_datasets
-from samplers.hmc_sampler import HMCSampler
-from models.plain_ffn.ffn import PlainFFNet
+from datasets.MNIST.load import load_datasets
+from samplers.pl_sampler import PLSampler
+from models.cnn.cnn import ConvolutionalNet
 from models.nnmodel import NNModel
 from utils.general import load_inputs, create_path, find_path
 
 # Load the input files and make the results directory
 def prepare_directory(args):
 	pars = {key: load_inputs(args.pars_file, start=f"## {key}", end="##") for key in ["model", "data", "sampler"]}
-	settings = load_inputs(args.settings_file)
+	pars['data']['filedir'] = '../../code/datasets/MNIST'
+    pars['data']['flatten'] = False #since we are using a cnn 
+	
+    settings = load_inputs(args.settings_file)
 
 	create_path(settings['results_dir'])
 	settings['results_dir'] = find_path(raw_path=settings['results_dir'], dname='sim', pfile=args.pars_file, pname='pars.txt', lpfunc=load_inputs)
@@ -33,23 +36,23 @@ def main(args):
 	pars, settings = prepare_directory(args)
 
 	print('Loading nn-model...')
-	net = PlainFFNet(
-			input_dim=pars['model']['input_dim'],
-			hidden_dims=pars['model']['hidden_dims'],
-			output_dim=pars['model']['output_dim'],
-			seed=pars['model']['model_seed'],
-	)
+	net = ConvolutionalNet(
+            h=pars['model']['input_dims'][0],
+            w=pars['model']['input_dims'][1],
+            K=pars['model']['output_dim'],
+            seed=pars['model']['model_seed'],
+    )
 	model = NNModel(net)
 
 	print('Initializing datasets...')
-	datasets = generate_kspin_datasets(**pars['data'])
+	datasets = load_datasets(**pars['data'])
 
 	print('Defining cost and metric functions...')
 	Cost = lambda logits, target: F.cross_entropy(logits, target)
 	Metric = lambda logits, target: 1. - (logits.argmax(dim=1) == target).float().mean()
 
 	print('Initializing sampler...')
-	sampler = HMCSampler(
+	sampler = PLSampler(
 			model=model,
 			datasets=datasets,
 			Cost=Cost,
@@ -63,7 +66,7 @@ def main(args):
 			start_fn=pars["model"]["from"],
 	)
 	print(f'\nSimulation completed!')
-	
+
 
 def create_parser():
 	parser = argparse.ArgumentParser()
