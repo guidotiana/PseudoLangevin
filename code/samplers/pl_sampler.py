@@ -14,10 +14,10 @@ from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subs
 
 
 
-### ----------------------------------------- ###
-### Double-Extraction Pseudo-Langevin Sampler ###
-### ----------------------------------------- ###
-class DEPLSampler():
+### ----------------------- ###
+### Pseudo-Langevin Sampler ###
+### ----------------------- ###
+class PLSampler():
 
 	def __init__(
 			self,
@@ -25,7 +25,7 @@ class DEPLSampler():
 			datasets: dict[torch.utils.data.Dataset],
 			Cost: Callable,
 			Metric: Callable,
-			name: str = 'DEPLSampler'
+			name: str = 'PLSampler'
 	):
 		self.model = model
 		assert all([key in ["train", "val", "test"] for key in datasets]), f"{name}.__init__(): unexpected key in inputted datasets dictionary. Expected keys are: 'train', 'val', 'test'."
@@ -183,7 +183,7 @@ class DEPLSampler():
 				f'{self.name}._setup(): invalid value for one of the following keys ("log_zerovar") at index {idx}. Allowed values: v<0.'
 			)
 			assert all([pars_list[idx][key]<=pars_list[idx]["T_ratio_max"] for key in ["T_ratio_i", "T_ratio_f"]]), (
-				f'{self.name}._setup(): "T_ratio_i" ({pars_list[idx]["T_ratio_i"]}) and "T_ratio_f" ({pars_list[idx]["T_ratio_f"]}) must be lower than "T_ratio_max" ({pars_list[idx]["T_ratio_max"]}).',
+				f'{self.name}._setup(): "T_ratio_i" ({pars_list[idx]["T_ratio_i"]}) and "T_ratio_f" ({pars_list[idx]["T_ratio_f"]}) must be lower than "T_ratio_max" ({pars_list[idx]["T_ratio_max"]}).'
 				f'Check values at index {idx}.'
 			)
 
@@ -220,8 +220,8 @@ class DEPLSampler():
 
 			self.model.load(self.log['files']['weights'])
 			self.generator.load(self.log['files']['generator'])
-			varpars = torch.load(self.log["files"]["varpars"])
-			momenta = torch.load(self.log["files"]["momenta"])
+			varpars = torch.load(self.log["files"]["varpars"], map_location=settings["device"])
+			momenta = torch.load(self.log["files"]["momenta"], map_location=settings["device"])
 			self.weights_ref = torch.load(self.log['files']['weights_ref'], map_location=settings["device"], weights_only=True)
 
 			steps_and_sample_list = self._get_steps_and_sample_list(varpars["tot_moves"], data["move"], settings["data_step"])
@@ -299,23 +299,31 @@ class DEPLSampler():
 
 
 	def _integrate(self, momenta, varpars, steps):
-		for _ in range(steps):
-			old_grad = self._compute_grad(varpars)
-			old_noise = self._generate_noise()
+		grad = self._compute_grad(varpars)
+		noise = self._generate_noise()
+		Pi = {
+			layer: momenta[layer]*varpars['c1'] - grad[layer]*0.5 + noise[layer]*varpars['k_wn'][layer]
+			for layer in self.model.weights
+		}
 
+		for step in range(1, steps+1):
 			with torch.no_grad():
 				for layer in self.model.weights:
-					vvd = (momenta[layer]*varpars['c1'] - old_grad[layer]*0.5) / varpars['M'][layer]
-					bpn = old_noise[layer]*varpars['k_wn'][layer]/varpars['M'][layer]
-					self.model.weights[layer] += vvd + bpn
+					self.model.weights[layer] += Pi[layer]/varpars['M'][layer]
 
-			new_grad = self._compute_grad(varpars)
-			new_noise = self._generate_noise()
+			grad = self._compute_grad(varpars)
+			noise = self._generate_noise()
 
-			for layer in self.model.weights:
-				vvd = momenta[layer]*(varpars['c1']**2.-1.) - (new_grad[layer]+old_grad[layer])*varpars['c1']*0.5
-				bpn = old_noise[layer]*varpars['c1']*varpars['k_wn'][layer] + new_noise[layer]*torch.sqrt( varpars['var'][layer]*(0.5*varpars['m1'])**2 + varpars['k_wn'][layer]**2. )
-				momenta[layer] += vvd + bpn
+			if step < steps:
+				for layer in self.model.weights:
+					vvd = Pi[layer]*varpars['c1']**2. - grad[layer]*(1.+varpars['c1']**2.)*0.5
+					bpn = noise[layer]*np.sqrt(1.+varpars['c1']**2.)*torch.sqrt( varpars['k_wn'][layer]**2. - varpars['var'][layer]*(varpars['c1']*0.5)**2 )
+					Pi[layer] = vvd + bpn
+
+		for layer in self.model.weights:
+			vvd = (Pi[layer] - grad[layer]*0.5)*varpars['c1']
+			bpn = noise[layer]*torch.sqrt( varpars['k_wn'][layer]**2. + varpars['var'][layer]*(varpars['m1']*0.5)**2. )
+			momenta[layer] = vvd + bpn
 
 		return momenta
 
@@ -454,7 +462,8 @@ class DEPLSampler():
 				next_var[layer].clamp_(min=eps)
 				converged.append(
 					torch.allclose(
-						torch.sqrt(next_var[layer]/curr_var_l), torch.ones_like(curr_var_l),
+						#torch.sqrt( (next_var[layer]+eps) / (curr_var_l+eps) ), torch.ones_like(curr_var_l),
+						torch.sqrt( next_var[layer]/curr_var_l ), torch.ones_like(curr_var_l),
 						atol=varpars['threshold_est'],
 					)
 				)
@@ -466,17 +475,18 @@ class DEPLSampler():
 			if all(converged):
 				break
 
+		#curr_var = {l: v+eps for l,v in curr_var.items()}
 		return curr_var, tot_extractions
 
 	def _update_varpars(self, varpars, momenta=None, verbose=True):
 		if verbose:
-			print("\n!!! Update of the mini-batch noise variances and all the related parameters !!!")
+			print("\n!!! Update of the mini-batch noise variances and all the related parameters !!!\n")
 		curr_var, tot_extractions = self._estimate_var(varpars, verbose)
 
 		# 0. Initiate temperatures ratio and weight masses
 		if 'var' not in varpars.keys():
 			if verbose:
-				print(f"Initialization of the temperatures ratios and other parameters.")
+				print(f"\nInitialization of the temperatures ratios and other parameters.")
 			varpars['c1'] = np.sqrt(1.-varpars['m1']**2.).item()
 			varpars['M'], varpars['T_ratio'], varpars['k_wn'] = {}, {}, {}
 			for layer, curr_var_l in curr_var.items():
@@ -486,21 +496,21 @@ class DEPLSampler():
 
 		else:
 			reset = torch.rand(1, device=self.model.device, generator=self.generator.get()).item() <= varpars["p_reset"]
-			
+
 			# 1. Reset temperatures ratio, weight masses and momenta according to the current variances
 			if reset:
 				if verbose:
-					print(f"Reset of the temperatures ratios and extraction of new momenta.")
+					print(f"\nReset of the temperatures ratios and extraction of new momenta.")
 				for layer, curr_var_l in curr_var.items():
 					varpars['T_ratio'][layer] = torch.full_like(curr_var_l, varpars['T_ratio_f'])
 					varpars['M'][layer] = curr_var_l/(4.*varpars['T_ratio_f']*varpars['T']*varpars['m1']**2.)
 					varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*0.5**2. )
 					momenta[layer] = torch.randn(self.model.weights[layer].shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][layer])
-				
+
 			# 2. Standard (controlled) update of the temperatures ratio
 			else:
 				if verbose:
-					print(f"Standard (controlled) update of the temperatures ratios and other parameters.")
+					print(f"\nStandard (controlled) update of the temperatures ratios and other parameters.")
 				for layer, curr_var_l in curr_var.items():
 					varpars["T_ratio"][layer] *= curr_var_l/varpars["var"][layer]
 					mask = varpars["T_ratio"][layer] > varpars["T_ratio_max"]
@@ -554,21 +564,21 @@ class DEPLSampler():
 
 	def _save_log(self, data, varpars, momenta, settings, is_ref=False):
 		self._flush_buffer(settings)
-		
+
 		files_log_names = {
 			"generator": f'{settings["results_dir"]}/generator.npy',
 			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
 		}
 		for key in ["weights", "momenta", "varpars"]:
 			files_log_names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt'
-
+        
 		self.model.save(files_log_names["weights"])
 		self.generator.save(files_log_names["generator"])
 		torch.save(varpars, files_log_names["varpars"])
 		torch.save(momenta, files_log_names["momenta"])
 		if is_ref:
 			self.model.save(files_log_names["weights_ref"])
-
+    
 		self.log = {
 			"data": data.copy(),
 			"files": files_log_names.copy(),
@@ -609,10 +619,10 @@ class DEPLSampler():
 		if pars_idx["p_reset"] > 0.:
 			lines.append(f'# final temperatures ratio:   {pars_idx["T_ratio_f"]:.1e}')
 		lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
-		lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
-		lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
 		lines.append(f'# adjournment interval:       {pars_idx["adj_step"]:.0f}')
 		lines.append(f'# minimum variances value:    10^({pars_idx["log_zerovar"]:.1f})')
+		lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
+		lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
 		lines.append(f'# mini-batch size:            {pars_idx["mbs"]:.0f}')
 		if pars_idx["mean"]:
 			lines.append(f'# mean variances:             {pars_idx["mean"]} (from axis={pars_idx["axis"]})')
@@ -682,7 +692,7 @@ class DEPLSampler():
 			"max_extractions": (1000, int),
 			"min_extractions": (100, int),
 			"threshold_est": (0.1, float),
-			"adj_step": (10000, int),
+			"adj_step": (1000, int),
 			"log_zerovar": (-9, float), 
 			"seed": (0, int),
 		}

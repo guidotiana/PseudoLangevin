@@ -1,6 +1,6 @@
 ## PAPER-1 data
 
-This repository contains the data necessary to reproduce the plots shown in [PAPER-1](http://arxiv.org/abs/2603.15367). Here is a brief description of the contant of each sub-directory.
+This repository contains the data necessary to reproduce the plots shown in [PAPER-1](http://arxiv.org/abs/2603.15367). Here is a brief description of the content of each sub-directory.
 
 #### Fig.3
 The data is relative to the N=11160 model applied to the binary spin vector problem. It is distributed in three sub-directories, `Fig.3a/`, `Fig.3b/`, `Fig.3c/`, and `Fig.3d/`, that is, one for each panel.

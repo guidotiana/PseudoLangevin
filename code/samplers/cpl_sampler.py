@@ -14,9 +14,9 @@ from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subs
 
 
 
-### ---------------------------------------------------------- ###
-### Double-Noise Pseudo-Langevin Sampler with Norm Constraints ###
-### ---------------------------------------------------------- ###
+### --------------------------------------------- ###
+### Pseudo-Langevin Sampler with Norm Constraints ###
+### --------------------------------------------- ###
 class ConstrainedPLSampler():
 
 	def __init__(
@@ -726,7 +726,7 @@ class ConstrainedPLSampler():
 			"max_extractions": (1000, int),
 			"min_extractions": (100, int),
 			"threshold_est": (0.1, float),
-			"adj_step": (10000, int),
+			"adj_step": (1000, int),
 			"log_zerovar": (-9, float),
 			"seed": (0, int),
 		}
