@@ -14,10 +14,10 @@ from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subs
 
 
 
-### ----------------------------- ###
-### Naive Pseudo-Langevin Sampler ###
-### ----------------------------- ###
-class NaivePLSampler():
+### ------------------------------------------------------------ ###
+### Preconditioned Stochastic Gradient Langevin Dynamics Sampler ###
+### ------------------------------------------------------------ ###
+class pSGLDSampler():
 
 	def __init__(
 			self,
@@ -25,7 +25,7 @@ class NaivePLSampler():
 			datasets: dict[torch.utils.data.Dataset],
 			Cost: Callable,
 			Metric: Callable,
-			name: str = 'NaivePLSampler'
+			name: str = 'pSGLDSampler'
 	):
 		self.model = model
 		assert all([key in ["train", "val", "test"] for key in datasets]), f"{name}.__init__(): unexpected key in inputted datasets dictionary. Expected keys are: 'train', 'val', 'test'."
@@ -45,31 +45,31 @@ class NaivePLSampler():
 			settings: dict,
 			start_fn: str | None = None,
 	):
-		pars_list, settings, data, varpars, momenta, steps_and_sample_list = self._setup(pars, settings, start_fn)
+		pars_list, settings, data, varpars, steps_and_sample_list = self._setup(pars, settings, start_fn)
 		del pars
 
 		for idx, pars_idx in enumerate(pars_list):
 			if idx > 0:
-				data, varpars, momenta, steps_and_sample_list = self._start(pars_idx, settings, idx)
+				data, varpars, steps_and_sample_list = self._start(pars_idx, settings, idx)
 			del pars_idx
 
 			data = self._correct_types(data, "data")
 			varpars = self._correct_types(varpars, "varpars")			
 
 			for (steps, sample) in steps_and_sample_list:
-				momenta = self._integrate(momenta, varpars, steps)
+				varpars = self._integrate(varpars, steps)
 				if sample:
-					data = self._sample(momenta, varpars, data["move"]+steps)
+					data = self._sample(varpars, data["move"]+steps)
 
 				if data["move"]%settings["print_step"] == 0:
 					self._print_status(data)
 				if data["move"]%settings["log_step"]==0:
-					self._save_log(data, varpars, momenta, settings)
+					self._save_log(data, varpars, settings)
 
-			momenta = self._integrate(momenta, varpars, steps=1)
+			varpars = self._integrate(varpars, steps=1)
 			if idx+1 == len(pars_list):
-				data = self._sample(momenta, varpars, varpars["tot_moves"])
-				self._save_log(data, varpars, momenta, settings)
+				data = self._sample(varpars, varpars["tot_moves"])
+				self._save_log(data, varpars, settings)
 				self._print_status(data)
 
 		del self.log, self.generator, self.weights_ref, self.t0
@@ -206,7 +206,6 @@ class NaivePLSampler():
 			self.model.load(self.log['files']['weights'])
 			self.generator.load(self.log['files']['generator'])
 			varpars = torch.load(self.log["files"]["varpars"])
-			momenta = torch.load(self.log["files"]["momenta"])
 			self.weights_ref = torch.load(self.log['files']['weights_ref'], map_location=settings["device"], weights_only=True)
 
 			steps_and_sample_list = self._get_steps_and_sample_list(varpars["tot_moves"], data["move"], settings["data_step"])
@@ -224,14 +223,13 @@ class NaivePLSampler():
 			self.t0 = ptime()
 			if start_fn is not None:
 				self.model.load(start_fn)
-			data, varpars, momenta, steps_and_sample_list = self._start(pars_list[0].copy(), settings, 0)
+			data, varpars, steps_and_sample_list = self._start(pars_list[0].copy(), settings, 0)
 
 		return (
 			pars_list,
 			settings,
 			data,
 			varpars,
-			momenta,
 			steps_and_sample_list,
 		)
 
@@ -247,31 +245,23 @@ class NaivePLSampler():
 			q = compute_q(self.model.weights, self.weights_ref).item()
 			d2 = compute_d2(self.model.weights, self.weights_ref).item()
 
-		varpars = pars_idx.copy()
-		varpars['c1'] = np.sqrt(1.-varpars['m1']**2.)
-		varpars['C2'] = np.sqrt( varpars['M']*varpars['T']*varpars['m1']**2. )
-
-		momenta = {
-				layer: torch.randn(values.shape, device=settings["device"], generator=self.generator.get()) * np.sqrt(varpars['T']*varpars['M'])
-				for layer, values in self.model.weights.items()
-		}
+		varpars = self._update_varpars(pars_idx.copy())
 
 		data = {
 			'move': varpars['tot_moves']-varpars['moves'],
 			'time': ptime()-self.t0,
 			'q': q,
 			'd2': d2,
-			'K': self._compute_K(momenta, varpars),
 		}
 		obs = self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], bss=varpars['bss'])
 		data = merge_dict(from_dict=obs, into_dict=data)
 		self._extend_buffer(data, header=data['move']==0)
-		self._save_log(data, varpars, momenta, settings, is_ref=varpars["adj_ref"])
+		self._save_log(data, varpars, settings, is_ref=varpars["adj_ref"])
 		self._print_status(data, header=True)
 
 		steps_and_sample_list = self._get_steps_and_sample_list(varpars["tot_moves"], data["move"], settings["data_step"])
 
-		return data, varpars, momenta, steps_and_sample_list
+		return data, varpars, steps_and_sample_list
 
 
 
@@ -286,40 +276,26 @@ class NaivePLSampler():
 
 
 
-	def _integrate(self, momenta, varpars, steps):
-		grad = self._compute_grad(varpars)
-		noise = self._generate_noise()
-		Pi = {
-			layer: momenta[layer]*varpars['c1'] - grad[layer]*varpars['dt']/2. + noise[layer]*varpars['C2']
-			for layer in self.model.weights
-		}
-
+	def _integrate(self, varpars, steps):
 		for step in range(1, steps+1):
-			with torch.no_grad():
-				for layer in self.model.weights:
-					self.model.weights[layer] += Pi[layer]*varpars['dt']/varpars['M']
-
 			grad = self._compute_grad(varpars)
+			varpars = self._update_varpars(varpars, grad)
 			noise = self._generate_noise()
 
-			if step < steps:
+			with torch.no_grad():
 				for layer in self.model.weights:
-					Pi[layer] = Pi[layer]*varpars['c1']**2. - grad[layer]*(1.+varpars['c1']**2.)*varpars['dt']/2. + noise[layer]*np.sqrt(1.+varpars['c1']**2.)*varpars['C2']
+					self.model.weights[layer] += - varpars["dt"]*varpars["G-1"][layer]*grad[layer] + noise[layer]*torch.sqrt(2*varpars["dt"]*varpars["T"]*varpars["G-1"][layer])
 
-		for layer in self.model.weights:
-			momenta[layer] = (Pi[layer] - grad[layer]*varpars['dt']/2.)*varpars['c1'] + noise[layer]*varpars['C2']
-
-		return momenta
+		return varpars
 
 
 
-	def _sample(self, momenta, varpars, move):
+	def _sample(self, varpars, move):
 		data = {
 			'move': move,
 			'time': ptime()-self.t0,
 			'q': compute_q(self.model.weights, self.weights_ref).item(),
 			'd2': compute_d2(self.model.weights, self.weights_ref).item(),
-			'K': self._compute_K(momenta, varpars),
 		}
 		obs = self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], bss=varpars['bss'])
 		data = merge_dict(from_dict=obs, into_dict=data)
@@ -339,12 +315,12 @@ class NaivePLSampler():
 			loss = cost + (lamda/2.)*mod2 + (gamma/2.)*d2
 			loss.backward(retain_graph=False)
 			return None
-		
+
 		# used during _sample(), to compute the values of the observables on the full-batch
 		else:
 			mod2 = mod2.detach().item()
 			d2 = d2.detach().item()
-		
+
 			obs = {}
 			for key, dataset in self.datasets.items():
 				P = len(dataset)
@@ -359,8 +335,8 @@ class NaivePLSampler():
 						cost += cost_bs.detach().item()
 						metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
 						metric += metric_bs.detach().item()
-					
-					obs["loss"]	= cost + (lamda/2.)*mod2 + (gamma/2.)*d2
+
+					obs["loss"] = cost + (lamda/2.)*mod2 + (gamma/2.)*d2
 					obs["cost"] = cost
 					obs["mod2"] = mod2
 					obs["d2"] = d2
@@ -378,28 +354,35 @@ class NaivePLSampler():
 
 			return obs
 
-	def _compute_K(self, momenta, varpars):
-		K = 0.
-		for layer in momenta:
-			K += (0.5*(momenta[layer]**2.)/varpars["M"]).sum()
-		return K.item()
-
-	def _compute_grad(self, varpars):
-		mb_mask = torch.zeros((len(self.datasets["train"]),), dtype=torch.bool)
-		mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
-		#WRONG: mb_idxs = torch.randperm(len(self.datasets["train"]), device=self.model.device, generator=self.generator.get())[:varpars['mbs']]
-		mb_mask[mb_idxs] = True
-		x, y = self.datasets["train"][mb_mask]
-		self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], x=x, y=y)
-		grad = self.model.copy(grad=True)
-		self.model.zero_grad()
-		return grad
-
 	def _generate_noise(self):
 		return {
 			layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get())
 			for layer, values in self.model.weights.items()
 		}
+
+	def _compute_grad(self, varpars):
+		#mb_mask = torch.zeros((len(self.datasets["train"]),), dtype=torch.bool)
+		#mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
+		#mb_mask[mb_idxs] = True
+		#x, y = self.datasets["train"][mb_mask]
+		mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
+		x, y = self.datasets["train"][mb_idxs]
+		self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], x=x, y=y)
+		grad = self.model.copy(grad=True)
+		self.model.zero_grad()
+		return grad
+
+	def _update_varpars(self, varpars, grad=None):
+		if "V" not in varpars.keys():
+			varpars["V"] = {
+				layer: torch.zeros(weight.shape, device=self.model.device) for layer, weight in self.model.weights.items()
+			}
+			varpars["G-1"] = {}
+		else:
+			for layer, grad_l in grad.items():
+				varpars["V"][layer] = varpars["k2"]*varpars["V"][layer] + (1-varpars["k2"])*(grad_l**2)
+				varpars["G-1"][layer] = 1 / (2 * (varpars["k1"] + torch.sqrt(varpars["V"][layer])))
+		return varpars
 
 
 
@@ -421,20 +404,19 @@ class NaivePLSampler():
 		self.buffer.seek(0)
 		self.buffer.truncate(0)
 
-	def _save_log(self, data, varpars, momenta, settings, is_ref=False):
+	def _save_log(self, data, varpars, settings, is_ref=False):
 		self._flush_buffer(settings)
 
 		files_log_names = {
 			"generator": f'{settings["results_dir"]}/generator.npy',
 			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
 		}
-		for key in ["weights", "momenta", "varpars"]:
-			names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt',
+		for key in ["weights", "varpars"]:
+			files_log_names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt'
 
 		self.model.save(files_log_names["weights"])
 		self.generator.save(files_log_names["generator"])
 		torch.save(varpars, files_log_names["varpars"])
-		torch.save(momenta, files_log_names["momenta"])
 		if is_ref:
 			self.model.save(files_log_names["weights_ref"])
 
@@ -473,9 +455,9 @@ class NaivePLSampler():
 		lines.append(f'# ')
 		lines.append(f'# moves:             {pars_idx["moves"]:.1e}')
 		lines.append(f'# temperature:       {pars_idx["T"]:.1e}')
-		lines.append(f'# time step:         {pars_idx["dt"]:.3f}')
-		lines.append(f'# mass:              {pars_idx["M"]:.3f}')
-		lines.append(f'# mobility:          {pars_idx["m1"]:.3f}')
+		lines.append(f'# time step:         {pars_idx["dt"]:.1e}')
+		lines.append(f'# k1 (G^-1):         {pars_idx["k1"]:.1e}')
+		lines.append(f'# k2 (V):            {pars_idx["k2"]:.2f}')
 		lines.append(f'# lamda:             {pars_idx["lamda"]:.1e}')
 		lines.append(f'# gamma:             {pars_idx["gamma"]:.1e}')
 		lines.append(f'# mini-batch size:   {pars_idx["mbs"]:.0f}')
@@ -485,7 +467,6 @@ class NaivePLSampler():
 		lines.append(f'# results directory: {settings["results_dir"]}')
 		lines.append(f'# weights directory: {settings["weights_dir"]}')
 		lines.append(f'# save all weights:  {settings["save_weights"]}')
-		lines.append(f'# save all momenta:  {settings["save_momenta"]}')
 		lines.append(f'# save all varpars:  {settings["save_varpars"]}')
 		if idx == 0:
 			lines.append(f'# restart:           {bool(settings["restart"])}')
@@ -526,12 +507,12 @@ class NaivePLSampler():
 		self.defpars = {
 			"stime":(None, float),
 			"T": (None, float),
-			"m1": (0.3, float),
+			"dt": (1.0, float),
+			"k1": (1.0e-5, float),
+			"k2": (0.99, float),
 			"lamda": (0., float),
 			"gamma": (0., float),
 			"adj_ref": (1, bool),
-			"dt": (1.0, float),
-			"M": (1.0, float),
 			"mbs": (128, int),
 			"bss": (0, int),
 			"seed": (0, int),
@@ -541,7 +522,6 @@ class NaivePLSampler():
 			"results_dir": ("./results", str),
 			"weights_dir": ("./results/weights", str),
 			"save_weights": (True, bool),
-			"save_momenta": (True, bool),
 			"save_varpars": (True, bool),
 			"data_step": (1000, int),
 			"log_step": (10000, int),

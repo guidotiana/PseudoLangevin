@@ -30,13 +30,14 @@ The `code/` directory is the core of this repository, as it contains the impleme
 
 #### models/ <a name="Code_models"></a>
 - `nnmodel.py`: it contains the `NNModel` python class. It is derived from the `torch.nn.Module` class and it incapsulates the neural network model to be studied. It is used in the sampling classes `PLSampler`, `ConstrainedPLSampler` and `HMCSampler`.
+- `cnn/`: implementation of a convolutional neural network as the python class `ConvolutionalNet`, studied in [PAPER-1](http://arxiv.org/abs/2603.15367).
 - `plain_ffn/`: implementation of a standard three-layer feedforward neural network with ReLU activation functions as the python class `PlainFFNet`, studied in [PAPER-1](http://arxiv.org/abs/2603.15367).
 - `pooling_ffn/`: implementation of a feedforward neural network with embedding and pooling layers for masked language modeling tasks as the python class `PoolingFFNet`, studied in [PAPER-2](http://arxiv.org/abs/2603.29529).
 - `transformer/`: implementation of an L-module tranformer-based encoder for masked language modeling tasks as the python class `TFNet`, studied in [PAPER-2](http://arxiv.org/abs/2603.29529).
 
 #### datasets/ <a name="Code_datasets"></a>
 - `KSpin/`: directory containing the code used to generate datasets of binary spin vectors, as described in [PAPER-1](http://arxiv.org/abs/2603.15367).
-- `MNIST/`: directory containing MNIST images and the code used to generate datasets from them, as described in [PAPER-1](http://arxiv.org/abs/2603.15367). 
+- `MNIST/`: directory containing dowloaded MNIST images and the code used to generate datasets from them, as described in [PAPER-1](http://arxiv.org/abs/2603.15367). 
 - `Protein/`: directory containing masked sequences derived from the acyl–coenzyme A binding protein contact map and the code to generate datasets from them, as described in [PAPER-2](http://arxiv.org/abs/2603.29529).
 
 #### generator/ <a name="Code_generator"></a>
@@ -50,7 +51,7 @@ The `code/` directory is the core of this repository, as it contains the impleme
 
 ---
 ## Usage templates <a name="Usage"></a>
-Here are provided a few examples on how to use the implementation of the pseudo-Langevin and of the hybrid Monte Carlo algorithms.<br>
+Here are provided a few examples on how to use the implementation of the pseudo-Langevin algorithm.<br>
 As a prerequisite, you must have PyTorch installed to use this repository. You can use this one-liner for cloning:
 ```bash
 git clone "https://github.com/guidotiana/PseudoLangevin"
