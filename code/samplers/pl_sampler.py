@@ -14,10 +14,10 @@ from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subs
 
 
 
-### ------------------------------------ ###
-### Double-Noise Pseudo-Langevin Sampler ###
-### ------------------------------------ ###
-class PLSampler():
+### ----------------------------------------- ###
+### Double-Extraction Pseudo-Langevin Sampler ###
+### ----------------------------------------- ###
+class DEPLSampler():
 
 	def __init__(
 			self,
@@ -25,7 +25,7 @@ class PLSampler():
 			datasets: dict[torch.utils.data.Dataset],
 			Cost: Callable,
 			Metric: Callable,
-			name: str = 'PLSampler'
+			name: str = 'DEPLSampler'
 	):
 		self.model = model
 		assert all([key in ["train", "val", "test"] for key in datasets]), f"{name}.__init__(): unexpected key in inputted datasets dictionary. Expected keys are: 'train', 'val', 'test'."
@@ -42,7 +42,7 @@ class PLSampler():
 	def sample(
 			self,
 			pars: dict,
-			settings: dict | None = None,
+			settings: dict,
 			start_fn: str | None = None,
 	):
 		pars_list, settings, data, varpars, momenta, steps_and_sample_list = self._setup(pars, settings, start_fn)
@@ -82,17 +82,13 @@ class PLSampler():
 	def _setup(
 			self,
 			pars: dict,
-			settings: dict | None,
-			start_fn: str | None,
+			settings: dict,
+			start_fn: str | None = None,
 	):
 		# 1. SETTINGS
 		# First inputted settings are controlled and completed. Then, data, log and print steps are rounded to be divisible.
 		# Finally threads and devices are set. Once the device is defined, the model, the data and the generator are loaded on the correct device.
-		if settings is None:
-			settings = {}
-		else:
-			assert is_subset(settings.keys(), self.defsettings.keys()), f"{self.name}._setup(): unexpected key in inputted settings dictionary. Expected keys are: {list(self.defsettings.keys())}."
-		
+		assert is_subset(settings.keys(), self.defsettings.keys()), f"{self.name}._setup(): unexpected key in inputted settings dictionary. Expected keys are: {list(self.defsettings.keys())}."
 		for key, (value, typ) in self.defsettings.items():
 			if key not in settings:
 				settings[key] = value
@@ -153,8 +149,8 @@ class PLSampler():
 
 			tot_moves = 0
 			pars_list = []
-			for idx, (stime, dt) in enumerate(zip(pars['stime'], pars['dt'])):
-				moves = int(stime/dt)
+			for idx, stime in enumerate(pars['stime']):
+				moves = round(stime)
 				tot_moves += moves
 				pars_idx = {'moves': moves, 'tot_moves': tot_moves}
 				for key, value in pars.items():
@@ -162,7 +158,7 @@ class PLSampler():
 				pars_list.append(pars_idx)
 
 		else:
-			pars["moves"] = int(pars["stime"]/pars["dt"])
+			pars["moves"] = round(pars["stime"])
 			pars['tot_moves'] = pars['moves']
 			pars_list = [pars]
 
@@ -173,12 +169,12 @@ class PLSampler():
 			assert all([0.<v<1. for k,v in pars_list[idx].items() if k in ["T_ratio_i", "T_ratio_f", "T_ratio_max", "m1"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("T_ratio_i", "T_ratio_f", "T_ratio_max", "m1") at index {idx}. Allowed values: 0<v<1.'
 			)
-			assert all([v>=0. for k,v in pars_list[idx].items() if k in ["gamma", "lamda", "bss", "threshold_est", "threshold_adj"]]), (
-			    f'{self.name}._setup(): invalid value for one of the following keys ("gamma", "lamda", "bss", "threshold_est", "threshold_adj") at index {idx}. Allowed values: v>=0.'
+			assert all([v>=0. for k,v in pars_list[idx].items() if k in ["gamma", "lamda", "bss", "threshold_est"]]), (
+			    f'{self.name}._setup(): invalid value for one of the following keys ("gamma", "lamda", "bss", "threshold_est") at index {idx}. Allowed values: v>=0.'
 			)
-			assert all([v>0. for k,v in pars_list[idx].items() if k in ["stime", "moves", "tot_moves", "T", "dt", "max_extractions", "min_extractions", "max_adj_step", "min_adj_step"]]), (
+			assert all([v>0. for k,v in pars_list[idx].items() if k in ["stime", "moves", "tot_moves", "T", "max_extractions", "min_extractions", "adj_step"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys '
-			    f'("stime", "moves", "tot_moves", "T", "dt", "max_extractions", "min_extractions", "max_adj_step", "min_adj_step") at index {idx}. Allowed values: v>0.'
+			    f'("stime", "moves", "tot_moves", "T", "max_extractions", "min_extractions", "adj_step") at index {idx}. Allowed values: v>0.'
 			)
 			assert all([v in [0,1] for k,v in pars_list[idx].items() if k in ["adj_ref", "mean"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("adj_ref", "mean") at index {idx}. Allowed values: v==0 or v==1.'
@@ -187,12 +183,11 @@ class PLSampler():
 				f'{self.name}._setup(): invalid value for one of the following keys ("log_zerovar") at index {idx}. Allowed values: v<0.'
 			)
 			assert all([pars_list[idx][key]<=pars_list[idx]["T_ratio_max"] for key in ["T_ratio_i", "T_ratio_f"]]), (
-				f'{self.name}._setup(): "T_ratio_i" ({pars_list[idx]["T_ratio_i"]}) and "T_ratio_f" ({pars_list[idx]["T_ratio_f"]}) must be lower than "T_ratio_max" ({pars_list[idx]["T_ratio_max"]}).'
+				f'{self.name}._setup(): "T_ratio_i" ({pars_list[idx]["T_ratio_i"]}) and "T_ratio_f" ({pars_list[idx]["T_ratio_f"]}) must be lower than "T_ratio_max" ({pars_list[idx]["T_ratio_max"]}).',
 				f'Check values at index {idx}.'
 			)
 
-			pars_list[idx]["min_adj_step"] = roundup(multiple=pars_list[idx]["min_adj_step"], divisor=settings["data_step"])
-			pars_list[idx]["max_adj_step"] = roundup(multiple=pars_list[idx]["max_adj_step"], divisor=pars_list[idx]["min_adj_step"])
+			pars_list[idx]["adj_step"] = roundup(multiple=pars_list[idx]["adj_step"], divisor=settings["data_step"])
 			pars_list[idx]["max_extractions"] = roundup(multiple=pars_list[idx]["max_extractions"], divisor=pars_list[idx]["min_extractions"])
 			if pars_list[idx]["bss"] == 0:
 				pars_list[idx]["bss"] = max([len(dataset) for key, dataset in self.datasets.items()])
@@ -284,7 +279,7 @@ class PLSampler():
 		data = merge_dict(from_dict=obs, into_dict=data)
 		self._extend_buffer(data, header=data['move']==0)
 		self._save_log(data, varpars, momenta, settings, is_ref=varpars["adj_ref"])
-		self._print_status(data)
+		self._print_status(data, header=not settings['verbose'])
 
 		steps_and_sample_list = self._get_steps_and_sample_list(varpars["tot_moves"], data["move"], settings["data_step"])
 
@@ -304,31 +299,23 @@ class PLSampler():
 
 
 	def _integrate(self, momenta, varpars, steps):
-		grad = self._compute_grad(varpars)
-		noise = self._generate_noise()
-		Pi = {
-			layer: momenta[layer]*varpars['c1'] - grad[layer]*varpars['dt']/2. + noise[layer]*varpars['k_wn'][layer]
-			for layer in self.model.weights
-		}
+		for _ in range(steps):
+			old_grad = self._compute_grad(varpars)
+			old_noise = self._generate_noise()
 
-		for step in range(1, steps+1):
 			with torch.no_grad():
 				for layer in self.model.weights:
-					self.model.weights[layer] += Pi[layer]*varpars['dt']/varpars['M'][layer]
+					vvd = (momenta[layer]*varpars['c1'] - old_grad[layer]*0.5) / varpars['M'][layer]
+					bpn = old_noise[layer]*varpars['k_wn'][layer]/varpars['M'][layer]
+					self.model.weights[layer] += vvd + bpn
 
-			grad = self._compute_grad(varpars)
-			noise = self._generate_noise()
+			new_grad = self._compute_grad(varpars)
+			new_noise = self._generate_noise()
 
-			if step < steps:
-				for layer in self.model.weights:
-					vvd = Pi[layer]*varpars['c1']**2. - grad[layer]*(1.+varpars['c1']**2.)*varpars['dt']/2.
-					bpn = noise[layer]*np.sqrt(1.+varpars['c1']**2.)*torch.sqrt( varpars['k_wn'][layer]**2. - varpars['var'][layer]*(varpars['dt']*varpars['c1']/2.)**2 )
-					Pi[layer] = vvd + bpn
-
-		for layer in self.model.weights:
-			vvd = (Pi[layer] - grad[layer]*varpars['dt']/2.)*varpars['c1']
-			bpn = noise[layer]*torch.sqrt( varpars['k_wn'][layer]**2. + varpars['var'][layer]*(varpars['dt']*varpars['m1']/2.)**2. )
-			momenta[layer] = vvd + bpn
+			for layer in self.model.weights:
+				vvd = momenta[layer]*(varpars['c1']**2.-1.) - (new_grad[layer]+old_grad[layer])*varpars['c1']*0.5
+				bpn = old_noise[layer]*varpars['c1']*varpars['k_wn'][layer] + new_noise[layer]*torch.sqrt( varpars['var'][layer]*(0.5*varpars['m1'])**2 + varpars['k_wn'][layer]**2. )
+				momenta[layer] += vvd + bpn
 
 		return momenta
 
@@ -406,11 +393,12 @@ class PLSampler():
 		return K.item()
 
 	def _compute_grad(self, varpars):
-		mb_mask = torch.zeros((len(self.datasets["train"]),), dtype=torch.bool)
+		#mb_mask = torch.zeros((len(self.datasets["train"]),), dtype=torch.bool)
+		#mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
+		#mb_mask[mb_idxs] = True
+		#x, y = self.datasets["train"][mb_mask]
 		mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
-		#WRONG: mb_idxs = torch.randperm(len(self.datasets["train"]), device=self.model.device, generator=self.generator.get())[:varpars['mbs']]
-		mb_mask[mb_idxs] = True
-		x, y = self.datasets["train"][mb_mask]
+		x, y = self.datasets["train"][mb_idxs]
 		self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], x=x, y=y)
 		grad = self.model.copy(grad=True)
 		self.model.zero_grad()
@@ -425,6 +413,8 @@ class PLSampler():
 
 
 	def _estimate_var(self, varpars, verbose):
+		eps = 10**varpars["log_zerovar"]
+
 		# 1. Start by first computing the mini-batch-induced variances for each weight of the network
 		sum_grad, sum2_grad = {}, {}
 		for iext in range(varpars['min_extractions']):
@@ -443,7 +433,7 @@ class PLSampler():
 		curr_var = {}
 		for layer in sum_grad:
 			curr_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-			curr_var[layer].clamp_(min=10**varpars["log_zerovar"])
+			curr_var[layer].clamp_(min=eps)
 		if verbose:
 			print(f"First estimate at {tot_extractions} extractions terminated.")
 
@@ -461,7 +451,7 @@ class PLSampler():
 			next_var = {}
 			for layer, curr_var_l in curr_var.items():
 				next_var[layer] = estimate_variance(sum2_grad[layer].detach(), sum_grad[layer].detach(), tot_extractions, mean=varpars["mean"], axis=varpars["axis"])
-				next_var[layer].clamp_(min=10**varpars["log_zerovar"])
+				next_var[layer].clamp_(min=eps)
 				converged.append(
 					torch.allclose(
 						torch.sqrt(next_var[layer]/curr_var_l), torch.ones_like(curr_var_l),
@@ -479,92 +469,68 @@ class PLSampler():
 		return curr_var, tot_extractions
 
 	def _update_varpars(self, varpars, momenta=None, verbose=True):
-		print("\n!!! Update of the mini-batch noise variances and all the related parameters !!!\n")
+		if verbose:
+			print("\n!!! Update of the mini-batch noise variances and all the related parameters !!!")
 		curr_var, tot_extractions = self._estimate_var(varpars, verbose)
 
 		# 0. Initiate temperatures ratio and weight masses
 		if 'var' not in varpars.keys():
-			print(f"\nInitialization of the temperatures ratios and other parameters.\nThe streak is set to 1.")
-			varpars['streak'] = 1
+			if verbose:
+				print(f"Initialization of the temperatures ratios and other parameters.")
 			varpars['c1'] = np.sqrt(1.-varpars['m1']**2.).item()
 			varpars['M'], varpars['T_ratio'], varpars['k_wn'] = {}, {}, {}
 			for layer, curr_var_l in curr_var.items():
 				varpars['T_ratio'][layer] = torch.full_like(curr_var_l, varpars['T_ratio_i'])
-				varpars['M'][layer] = curr_var_l*varpars['dt']**2./(4.*varpars['T_ratio_i']*varpars['T']*varpars['m1']**2.)
-				varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
+				varpars['M'][layer] = curr_var_l/(4.*varpars['T_ratio_i']*varpars['T']*varpars['m1']**2.)
+				varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*0.5**2. )
 
 		else:
-			keep_streak = True
 			reset = torch.rand(1, device=self.model.device, generator=self.generator.get()).item() <= varpars["p_reset"]
 			
 			# 1. Reset temperatures ratio, weight masses and momenta according to the current variances
 			if reset:
-				print(f"\nReset of the temperatures ratios and extraction of new momenta.")
+				if verbose:
+					print(f"Reset of the temperatures ratios and extraction of new momenta.")
 				for layer, curr_var_l in curr_var.items():
 					varpars['T_ratio'][layer] = torch.full_like(curr_var_l, varpars['T_ratio_f'])
-					varpars['M'][layer] = curr_var_l*varpars['dt']**2./(4.*varpars['T_ratio_f']*varpars['T']*varpars['m1']**2.)
-					varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
+					varpars['M'][layer] = curr_var_l/(4.*varpars['T_ratio_f']*varpars['T']*varpars['m1']**2.)
+					varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*0.5**2. )
 					momenta[layer] = torch.randn(self.model.weights[layer].shape, device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars['T']*varpars['M'][layer])
-					
-					keep_streak *= torch.allclose(
-						torch.sqrt(curr_var_l/varpars["var"][layer]), torch.ones_like(curr_var_l),
-						atol=varpars['threshold_adj'],
-					)
 				
 			# 2. Standard (controlled) update of the temperatures ratio
 			else:
-				print(f"\nStandard (controlled) update of the temperatures ratios and other parameters.")
+				if verbose:
+					print(f"Standard (controlled) update of the temperatures ratios and other parameters.")
 				for layer, curr_var_l in curr_var.items():
 					varpars["T_ratio"][layer] *= curr_var_l/varpars["var"][layer]
 					mask = varpars["T_ratio"][layer] > varpars["T_ratio_max"]
 					if mask.any().item():
-						varpars, momenta, stats = self._increase_masses(varpars, momenta, curr_var_l, mask, layer)
-						print(f"ALERT: {stats['n']} ({100*stats['f']:.1f}%) T_ratios on layer {layer} have reached the threshold value {varpars['T_ratio_max']}. Starting the update of the mass matrix M!")
+						varpars["T_ratio"][layer][mask] = varpars["T_ratio_max"]
+						varpars["M"][layer][mask] = ( 1./(4.*varpars["T"]*varpars["m1"]**2) ) * curr_var_l[mask]/varpars["T_ratio_max"]
+						varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*0.5**2. )
 
-					keep_streak *= torch.allclose(
-						torch.sqrt(curr_var_l/varpars["var"][layer]), torch.ones_like(curr_var_l),
-						atol=varpars['threshold_adj'],
-					)
+						momenta_l_shape = list(momenta[layer].shape)
+						flat_momenta_l = momenta[layer].flatten()
+						if varpars["mean"]:
+							axis = varpars["axis"] if varpars["axis"]>=0 else max([len(momenta_l_shape)+varpars["axis"], 0])
+							repeated_shape = tuple( [1]*axis + momenta_l_shape[axis:] )
+							repeated_mask = mask.repeat(repeated_shape)
+							flat_M_l_masked = varpars["M"][layer].repeat(repeated_shape)[repeated_mask].flatten()
+							flat_momenta_l[ repeated_mask.flatten() ] = torch.randn(repeated_mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars["T"]*flat_M_l_masked)
+						else:
+							flat_M_l_masked = varpars["M"][layer][mask].flatten()
+							flat_momenta_l[ mask.flatten() ] = torch.randn(mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars["T"]*flat_M_l_masked)
+						momenta[layer] = flat_momenta_l.reshape(momenta_l_shape)
 
-			if keep_streak:
-				varpars['streak'] += 1
-				print(f"Compatible current and previous variances: the streak is increased to {varpars['streak']}.")
-			else:
-				varpars['streak'] = 1
-				print(f"Incompatible current and previous variances: the streak is set back to {varpars['streak']}.")
-		
-		varpars['adj_step'] = min([varpars['streak']*varpars['min_adj_step'], varpars['max_adj_step']])
+						if verbose:
+							print(f"ALERT: T_ratios on layer '{layer}' have reached the threshold value {varpars['T_ratio_max']}. Starting the update of the mass matrix M!")
+
 		varpars['var'], varpars['tot_extractions'] = wcopy(curr_var), tot_extractions
-		
-		print(f"The current adjournment step is {varpars['adj_step']}.")
-		print(f'Back to the simulation.\n')
-		print(f'// {self.name} status register:')
-		print(f'{self.separator}\n{self.header}\n{self.separator}')
+		if verbose:
+			print(f'Back to the simulation.\n')
+			print(f'// {self.name} status register:')
+			print(f'{self.separator}\n{self.header}\n{self.separator}')
 		return varpars, momenta
-
-	def _increase_masses(self, varpars, momenta, curr_var_l, mask, layer):
-		varpars["T_ratio"][layer][mask] = varpars["T_ratio_max"]
-		varpars["M"][layer][mask] = ( varpars["dt"]**2./(4.*varpars["T"]*varpars["m1"]**2) ) * curr_var_l[mask]/varpars["T_ratio_max"]
-		varpars['k_wn'][layer] = torch.sqrt( varpars['M'][layer]*varpars['T']*varpars['m1']**2. - curr_var_l*(varpars['dt']/2.)**2. )
-
-		momenta_l_shape = list(momenta[layer].shape)
-		flat_momenta_l = momenta[layer].flatten()
-		if varpars["mean"]:
-			axis = varpars["axis"] if varpars["axis"]>=0 else max([len(momenta_l_shape)+varpars["axis"], 0])
-			repeated_shape = tuple( [1]*axis + momenta_l_shape[axis:] )
-			repeated_mask = mask.repeat(repeated_shape)
-			flat_M_l_masked = varpars["M"][layer].repeat(repeated_shape)[repeated_mask].flatten()
-			flat_momenta_l[ repeated_mask.flatten() ] = torch.randn(repeated_mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars["T"]*flat_M_l_masked)
-			n = repeated_mask.sum().item()
-		else:
-			flat_M_l_masked = varpars["M"][layer][mask].flatten()
-			flat_momenta_l[ mask.flatten() ] = torch.randn(mask.sum(), device=self.model.device, generator=self.generator.get()) * torch.sqrt(varpars["T"]*flat_M_l_masked)
-			n = mask.sum().item()
-		momenta[layer] = flat_momenta_l.reshape(momenta_l_shape)
-
-		N = np.cumprod(momenta_l_shape)[-1].item()
-		stats = {"n":n, "f":n/N}
-		return varpars, momenta, stats
 
 
 
@@ -588,21 +554,21 @@ class PLSampler():
 
 	def _save_log(self, data, varpars, momenta, settings, is_ref=False):
 		self._flush_buffer(settings)
-
+		
 		files_log_names = {
 			"generator": f'{settings["results_dir"]}/generator.npy',
 			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
 		}
 		for key in ["weights", "momenta", "varpars"]:
 			files_log_names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt'
-        
+
 		self.model.save(files_log_names["weights"])
 		self.generator.save(files_log_names["generator"])
 		torch.save(varpars, files_log_names["varpars"])
 		torch.save(momenta, files_log_names["momenta"])
 		if is_ref:
 			self.model.save(files_log_names["weights_ref"])
-    
+
 		self.log = {
 			"data": data.copy(),
 			"files": files_log_names.copy(),
@@ -645,6 +611,8 @@ class PLSampler():
 		lines.append(f'# mobility:                   {pars_idx["m1"]:.2f}')
 		lines.append(f'# lamda:                      {pars_idx["lamda"]:.1e}')
 		lines.append(f'# gamma:                      {pars_idx["gamma"]:.1e}')
+		lines.append(f'# adjournment interval:       {pars_idx["adj_step"]:.0f}')
+		lines.append(f'# minimum variances value:    10^({pars_idx["log_zerovar"]:.1f})')
 		lines.append(f'# mini-batch size:            {pars_idx["mbs"]:.0f}')
 		if pars_idx["mean"]:
 			lines.append(f'# mean variances:             {pars_idx["mean"]} (from axis={pars_idx["axis"]})')
@@ -677,7 +645,7 @@ class PLSampler():
 		# pars dictionary
 		if dname == "varpars":
 			types_and_keys = [
-					(int,  ['moves', 'tot_moves', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'max_adj_step', 'min_adj_step', 'streak', 'log_zerovar']),
+					(int,  ['moves', 'tot_moves', 'axis', 'mbs', 'max_extractions', 'min_extractions', 'adj_step']),
 					(bool, ['adj_ref', 'mean']),
 			]
 		# data dictionary
@@ -703,8 +671,8 @@ class PLSampler():
 			"m1": (0.1, float),
 			"lamda": (0.0, float),
 			"gamma": (0.0, float),
-			"dt": (1.0, float),
-			"p_reset": (0.1, float),
+			"adj_ref": (1, bool),
+			"p_reset": (0.0, float),
 			"T_ratio_f": ("T_ratio_i", float),
 			"T_ratio_max": ("T_ratio_i", float),
 			"mean": (False, bool),
@@ -714,11 +682,8 @@ class PLSampler():
 			"max_extractions": (1000, int),
 			"min_extractions": (100, int),
 			"threshold_est": (0.1, float),
-			"max_adj_step": (100000, int),
-			"min_adj_step": (5000, int),
-			"threshold_adj": (0.1, float),
-			"log_zerovar": (-8, int),
-            "adj_ref": (0, bool),
+			"adj_step": (10000, int),
+			"log_zerovar": (-9, float), 
 			"seed": (0, int),
 		}
 
@@ -731,7 +696,7 @@ class PLSampler():
 			"data_step": (1000, int),
 			"log_step": (10000, int),
 			"print_step": (1000, int),
-			"step_scale": (1, int),
+			"step_scale": (100, int),
 			"verbose": (True, bool),
 			"restart": (False, bool),
 			"device": ("cpu", str),
