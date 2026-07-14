@@ -4,6 +4,7 @@ from io import StringIO
 from time import process_time as ptime
 from collections.abc import Callable
 
+import math
 import torch
 import numpy as np
 
@@ -299,7 +300,7 @@ class HMCSampler():
 
 	def _init_momenta(self, pars):
 		momenta = {
-				layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get()) * np.sqrt(pars['T']*pars['M'])
+				layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get()) * math.sqrt(pars['T']*pars['M'])
 				for layer, values in self.model.weights.items()
 		}
 		return momenta
@@ -404,23 +405,17 @@ class HMCSampler():
 
 	def _save_log(self, data, settings, is_ref=False):
 		self._flush_buffer(settings)
-
-		files_log_names = {
-			"weights": f'{settings["weights_dir"]}/weights_{data["move"]}.pt' if settings[f"save_weights"] else f'{settings["weights_dir"]}/weights.pt',
-			"generator": f'{settings["results_dir"]}/generator.npy',
-			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
-		}
-
-		self.model.save(files_log_names["weights"])
-		self.generator.save(files_log_names["generator"])
-		if is_ref:
-			self.model.save(files_log_names["weights_ref"])
-
+		self.model.save(f'{settings["weights_dir"]}/weights_{data["move"]}.pt')
+		self.generator.save(f'{settings["results_dir"]}/generator.npy')
+		
 		self.log = {
 			"data": data.copy(),
-			"files": files_log_names.copy(),
+			"files": {
+				"weights": f'{settings["weights_dir"]}/weights_{data["move"]}.pt',
+				"generator": f'{settings["results_dir"]}/generator.npy',
+				"weights_ref": f'{settings["weights_dir"]}/weights_{data["move"]}.pt' if is_ref else self.log["files"]["weights_ref"],
+			},
 		}
-
 		torch.save(self.log, f'{settings["results_dir"]}/log.pt')
 
 	def _print_status(self, data, header=False):
@@ -455,15 +450,12 @@ class HMCSampler():
 		lines.append(f'# temperature:                {pars["T"]:.1e}')
 		lines.append(f'# integration time step:      {pars["dt"]:.1e}')
 		lines.append(f'# per-move integration steps: {pars["isteps"]:.0f}')
-		lines.append(f'# lamda:                      {pars["lamda"]:.1e}')
-		lines.append(f'# gamma:                      {pars["gamma"]:.1e}')
 		lines.append(f'# weights mass:               {pars["M"]:.2f}')
 		lines.append(f'# ')
 		lines.append(f'# fixed layers: {fixed}')
 		lines.append(f'# ')
 		lines.append(f'# results directory: {settings["results_dir"]}')
 		lines.append(f'# weights directory: {settings["weights_dir"]}')
-		lines.append(f'# save all weights:  {settings["save_weights"]}')
 		if idx == 0:
 			lines.append(f'# restart:           {bool(settings["restart"])}')
 		lines.append(f'# ')
@@ -506,9 +498,9 @@ class HMCSampler():
 			"dt": (1.0, float),
 			"isteps": (100, int),
 			"M": (1.0, float),
-            "lamda": (0.0, float),
 			"gamma": (0.0, float),
 			"adj_ref": (True, bool),
+			"lamda": (0.0, float),
 			"bss": (0, int),
 			"seed": (0, int),
 		}
@@ -516,8 +508,7 @@ class HMCSampler():
 		self.defsettings = {
 			"results_dir": ("./results", str),
 			"weights_dir": ("./results/weights", str),
-			"save_weights": (True, bool),
-            "data_step": (1, int),
+			"data_step": (1, int),
 			"log_step": (1, int),
 			"print_step": (1, int),
 			"step_scale": (1, int),

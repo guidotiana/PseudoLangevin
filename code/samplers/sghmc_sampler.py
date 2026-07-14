@@ -290,7 +290,6 @@ class SGHMCSampler():
 		# Estimate empirical Fisher information
 		if varpars['eFi']:
 			for step in range(1, steps+1):
-				print(f"step {step}")
 				with torch.no_grad():
 					for layer in self.model.weights:
 						self.model.weights[layer] += momenta[layer]*varpars['dt']/varpars['M']
@@ -358,16 +357,17 @@ class SGHMCSampler():
 				Nbs = P//bss if P%bss==0 else P//bss+1
 
 				if key == "train":
-					cost, metric = 0., 0.
-					for ibs in range(Nbs):
-						x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
-						fx = self.model.NN(x_bs)
-						cost_bs = self.Cost(fx, y_bs) * len(x_bs)/P
-						cost += cost_bs.detach().item()
-						metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
-						metric += metric_bs.detach().item()
+                    cost, metric = 0., 0.
+					with torch.no_grad():
+						for ibs in range(Nbs):
+							x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
+							fx = self.model.NN(x_bs)
+							cost_bs = self.Cost(fx, y_bs) * len(x_bs)/P
+							metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
+							cost += cost_bs.item()
+							metric += metric_bs.item()
 
-					obs["loss"] = cost + (lamda/2.)*mod2 + (gamma/2.)*d2
+					obs["loss"] = cost + (gamma/2.)*d2
 					obs["cost"] = cost
 					obs["mod2"] = mod2
 					obs["d2"] = d2
@@ -375,11 +375,12 @@ class SGHMCSampler():
 
 				else:
 					metric = 0.
-					for ibs in range(Nbs):
-						x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
-						fx = self.model.NN(x_bs)
-						metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
-						metric += metric_bs.detach().item()
+					with torch.no_grad():
+						for ibs in range(Nbs):
+							x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
+							fx = self.model.NN(x_bs)
+							metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
+							metric += metric_bs.item()
 
 					obs[f"{key}_metric"] = metric
 

@@ -14,10 +14,10 @@ from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subs
 
 
 
-### ----------------------- ###
-### Pseudo-Langevin Sampler ###
-### ----------------------- ###
-class PLSampler():
+### ----------------------------------------- ###
+### Single-Extraction Pseudo-Langevin Sampler ###
+### ----------------------------------------- ###
+class SEPLSampler():
 
 	def __init__(
 			self,
@@ -25,7 +25,7 @@ class PLSampler():
 			datasets: dict[torch.utils.data.Dataset],
 			Cost: Callable,
 			Metric: Callable,
-			name: str = 'PLSampler'
+			name: str = 'SEPLSampler'
 	):
 		self.model = model
 		assert all([key in ["train", "val", "test"] for key in datasets]), f"{name}.__init__(): unexpected key in inputted datasets dictionary. Expected keys are: 'train', 'val', 'test'."
@@ -368,15 +368,16 @@ class PLSampler():
 
 				if key == "train":
 					cost, metric = 0., 0.
-					for ibs in range(Nbs):
-						x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
-						fx = self.model.NN(x_bs)
-						cost_bs = self.Cost(fx, y_bs) * len(x_bs)/P
-						cost += cost_bs.detach().item()
-						metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
-						metric += metric_bs.detach().item()
-					
-					obs["loss"]	= cost + (lamda/2.)*mod2 + (gamma/2.)*d2
+					with torch.no_grad():
+						for ibs in range(Nbs):
+							x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
+							fx = self.model.NN(x_bs)
+							cost_bs = self.Cost(fx, y_bs) * len(x_bs)/P
+							metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
+							cost += cost_bs.item()
+							metric += metric_bs.item()
+
+					obs["loss"] = cost + (gamma/2.)*d2
 					obs["cost"] = cost
 					obs["mod2"] = mod2
 					obs["d2"] = d2
@@ -384,11 +385,12 @@ class PLSampler():
 
 				else:
 					metric = 0.
-					for ibs in range(Nbs):
-						x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
-						fx = self.model.NN(x_bs)
-						metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
-						metric += metric_bs.detach().item()
+					with torch.no_grad():
+						for ibs in range(Nbs):
+							x_bs, y_bs = dataset.x[ibs*bss:(ibs+1)*bss], dataset.y[ibs*bss:(ibs+1)*bss]
+							fx = self.model.NN(x_bs)
+							metric_bs = self.Metric(fx, y_bs) * len(x_bs)/P
+							metric += metric_bs.item()
 
 					obs[f"{key}_metric"] = metric
 
@@ -692,7 +694,7 @@ class PLSampler():
 			"max_extractions": (1000, int),
 			"min_extractions": (100, int),
 			"threshold_est": (0.1, float),
-			"adj_step": (1000, int),
+			"adj_step": (10000, int),
 			"log_zerovar": (-9, float), 
 			"seed": (0, int),
 		}

@@ -10,14 +10,14 @@ import numpy as np
 from models.nnmodel import NNModel
 from generator.custom_generator import CustomGenerator
 from utils.general import create_path
-from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subset, merge_dict, roundup, estimate_variance
+from utils.operations import wcopy, compute_q, compute_d2, compute_mod2, is_subset, merge_dict, roundup
 
 
 
-### ------------------------------------------------------------ ###
-### Preconditioned Stochastic Gradient Langevin Dynamics Sampler ###
-### ------------------------------------------------------------ ###
-class pSGLDSampler():
+### ------------------------------------- ###
+### Mini-batch hybrid Monte Carlo Sampler ###
+### ------------------------------------- ###
+class MBHMCSampler():
 
 	def __init__(
 			self,
@@ -25,7 +25,7 @@ class pSGLDSampler():
 			datasets: dict[torch.utils.data.Dataset],
 			Cost: Callable,
 			Metric: Callable,
-			name: str = 'pSGLDSampler'
+			name: str = 'MBHMCSampler'
 	):
 		self.model = model
 		assert all([key in ["train", "val", "test"] for key in datasets]), f"{name}.__init__(): unexpected key in inputted datasets dictionary. Expected keys are: 'train', 'val', 'test'."
@@ -45,31 +45,48 @@ class pSGLDSampler():
 			settings: dict,
 			start_fn: str | None = None,
 	):
-		pars_list, settings, data, varpars, steps_and_sample_list = self._setup(pars, settings, start_fn)
+		pars_list, settings, data = self._setup(pars, settings, start_fn)
 		del pars
 
-		for idx, pars_idx in enumerate(pars_list):
+		for idx, pars in enumerate(pars_list):
 			if idx > 0:
-				data, varpars, steps_and_sample_list = self._start(pars_idx, settings, idx)
-			del pars_idx
+				data = self._start(pars, settings, idx)
 
 			data = self._correct_types(data, "data")
-			varpars = self._correct_types(varpars, "varpars")			
+			pars = self._correct_types(pars, "pars")
 
-			for (steps, sample) in steps_and_sample_list:
-				varpars = self._integrate(varpars, steps)
-				if sample:
-					data = self._sample(varpars, data["move"]+steps)
+			for move in range(data["move"]+1, pars["tot_moves"]+1):
+				# Save starting weights vector
+				wi = self.model.copy(grad=False)
 
-				if data["move"]%settings["print_step"] == 0:
+				# Extract momenta and integrate the equations of motion
+				obf, dK = self._extract_and_integrate(pars)
+
+				# Compute energy difference and propose move
+				dE = obf['loss']-data['loss'] + dK
+				p = torch.rand(1, device=self.model.device, generator=self.generator.get()).item()
+				if p <= np.exp(-dE/pars['T']):
+					data = merge_dict(from_dict=obf, into_dict=data, overwrite=True)
+					data['q'] = compute_q(self.model.weights, self.weights_ref).item()
+					data['d2'] = compute_d2(self.model.weights, self.weights_ref).item()
+					data['am'] += 1
+					wi = self.model.copy(grad=False)
+				else:
+					self.model.set_weights(wi)
+
+				# Complete update of the remaining observables
+				data['move'] = move
+				data['time'] = ptime() - self.t0
+				self._extend_buffer(data)
+
+				# Save and/or print
+				if move%settings['log_step'] == 0:
+					self._save_log(data, settings)
+				if move%settings['print_step'] == 0:
 					self._print_status(data)
-				if data["move"]%settings["log_step"]==0:
-					self._save_log(data, varpars, settings)
 
-			varpars = self._integrate(varpars, steps=1)
-			if idx+1 == len(pars_list):
-				data = self._sample(varpars, varpars["tot_moves"])
-				self._save_log(data, varpars, settings)
+			if idx == len(pars_list):
+				self._save_log(data, settings)
 				self._print_status(data)
 
 		del self.log, self.generator, self.weights_ref, self.t0
@@ -102,8 +119,7 @@ class pSGLDSampler():
 			f"but found {settings['data_step']} ('data'), {settings['log_step']} ('log') and {settings['print_step']} ('print')."
 		)
 		settings["data_step"] = roundup(multiple=settings["data_step"], divisor=settings["step_scale"])
-		settings["log_step"] = roundup(multiple=settings["log_step"], divisor=settings["data_step"])
-		settings["print_step"] = roundup(multiple=settings["print_step"], divisor=settings["data_step"])
+		settings["log_step"] = roundup(multiple=settings["log_step"], divisor=settings["step_scale"])
 
 		assert settings["num_threads"] <= 5, f"{self.name}.setup(): invalid value for 'num_threads' variable {settings['num_threads']}. Allowed values: num_threads <= 5."
 		torch.set_num_threads(settings["num_threads"])
@@ -111,13 +127,13 @@ class pSGLDSampler():
 		settings["device"] = torch.device(settings["device"]) if isinstance(settings["device"], str) else settings["device"]
 		if ("cuda" in settings["device"].type) and (not torch.cuda.is_available()):
 			settings["device"] = torch.device("cpu")
-
+			
 
 		# 2. PARS
 		# First the inputted pars dictionary is checked, verifying the all the necessary keys are present.
 		# Then, the pars dictionary is completed, adding missing keys and checking the type for the inputted ones.
 		# Then, the pars dictionary is splitted up in a list of dictionaries, where each instance of parameters must be executed 
-		# when the previous one has been completed. Finally, the values are checked for each parameter instance.
+		# when the previous one has been completed. Finally, the range of the values are checked for each parameters instance.
 		assert is_subset(pars.keys(), self.defpars.keys()), f"{self.name}._setup(): unexpected key in inputted pars dictionary. Expected keys are: {list(self.defpars.keys())}."
 		for key, (value, typ) in self.defpars.items():
 			if value is None:
@@ -146,34 +162,30 @@ class pSGLDSampler():
 
 			tot_moves = 0
 			pars_list = []
-			for idx, (stime, dt) in enumerate(zip(pars['stime'], pars['dt'])):
-				moves = int(stime/dt)
+			for idx, (stime, dt, isteps) in enumerate(zip(pars['stime'], pars['dt'], pars['isteps'])):
+				moves = int(stime/(dt*isteps))
 				tot_moves += moves
 				pars_idx = {'moves': moves, 'tot_moves': tot_moves}
 				for key, value in pars.items():
 					pars_idx[key] = value[idx]
 				pars_list.append(pars_idx)
-
+		
 		else:
-			pars["moves"] = int(pars["stime"]/pars["dt"])
+			pars["moves"] = int(pars["stime"]/(pars["dt"]*pars["isteps"]))
 			pars['tot_moves'] = pars['moves']
 			pars_list = [pars]
-
+		
 		for idx in range(len(pars_list)):
-			assert all([0.<v<1. for k,v in pars_list[idx].items() if k in ["m1"]]), (
-			    f'{self.name}._setup(): invalid value for one of the following keys ("m1") at index {idx}. Allowed values: 0<v<1.'
-			)
 			assert all([v>=0. for k,v in pars_list[idx].items() if k in ["gamma", "lamda", "bss"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("gamma", "lamda", "bss") at index {idx}. Allowed values: v>=0.'
 			)
-			assert all([v>0. for k,v in pars_list[idx].items() if k in ["stime", "moves", "tot_moves", "T", "dt"]]), (
-			    f'{self.name}._setup(): invalid value for one of the following keys '
-			    f'("stime", "moves", "tot_moves", "T", "dt") at index {idx}. Allowed values: v>0.'
+			assert all([v>0. for k,v in pars_list[0].items() if k in ["stime", "moves", "tot_moves", "T", "dt", "M", "mbs"]]), (
+			    f'{self.name}._setup(): invalid value for one of the following keys ',
+			    f'("stime", "moves", "tot_moves", "T", "dt", "M", "mbs") at index {idx}. Allowed values: v>0.'
 			)
 			assert all([v in [0,1] for k,v in pars_list[idx].items() if k in ["adj_ref"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("adj_ref") at index {idx}. Allowed values: v==0 or v==1.'
 			)
-
 			if pars_list[idx]["bss"] == 0:
 				pars_list[idx]["bss"] = max([len(dataset) for key, dataset in self.datasets.items()])
 			if idx == 0:
@@ -205,10 +217,7 @@ class pSGLDSampler():
 
 			self.model.load(self.log['files']['weights'])
 			self.generator.load(self.log['files']['generator'])
-			varpars = torch.load(self.log["files"]["varpars"])
 			self.weights_ref = torch.load(self.log['files']['weights_ref'], map_location=settings["device"], weights_only=True)
-
-			steps_and_sample_list = self._get_steps_and_sample_list(varpars["tot_moves"], data["move"], settings["data_step"])
 
 			self._print_pars(pars_list[0], settings, 0)
 			self._print_status(data, header=True)
@@ -223,92 +232,85 @@ class pSGLDSampler():
 			self.t0 = ptime()
 			if start_fn is not None:
 				self.model.load(start_fn)
-			data, varpars, steps_and_sample_list = self._start(pars_list[0].copy(), settings, 0)
+
+			data = self._start(pars_list[0], settings, 0)
+
 
 		return (
 			pars_list,
 			settings,
 			data,
-			varpars,
-			steps_and_sample_list,
 		)
 
 
 
-	def _start(self, pars_idx, settings, idx):
-		self._print_pars(pars_idx, settings, idx)
+	def _start(self, pars, settings, idx):
+		self._print_pars(pars, settings, idx)
 
-		if pars_idx["adj_ref"]:
+		if pars["adj_ref"]:
 			self.weights_ref = self.model.copy(grad=False)
 			q, d2 = 1., 0.
 		else:
 			q = compute_q(self.model.weights, self.weights_ref).item()
 			d2 = compute_d2(self.model.weights, self.weights_ref).item()
-
-		varpars = self._update_varpars(pars_idx.copy())
-
 		data = {
-			'move': varpars['tot_moves']-varpars['moves'],
+			'move': pars['tot_moves']-pars['moves'],
 			'time': ptime()-self.t0,
 			'q': q,
 			'd2': d2,
+			'am': 0,
 		}
-		obs = self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], bss=varpars['bss'])
+		obs = self._compute_observables(lamda=pars['lamda'], gamma=pars['gamma'], bss=pars['bss'])
 		data = merge_dict(from_dict=obs, into_dict=data)
 		self._extend_buffer(data, header=data['move']==0)
-		self._save_log(data, varpars, settings, is_ref=varpars["adj_ref"])
+		self._save_log(data, settings, is_ref=pars["adj_ref"])
 		self._print_status(data, header=True)
 
-		steps_and_sample_list = self._get_steps_and_sample_list(varpars["tot_moves"], data["move"], settings["data_step"])
-
-		return data, varpars, steps_and_sample_list
-
-
-
-	def _get_steps_and_sample_list(self, tot_moves, curr_move, step_size):
-		remaining_moves = tot_moves-(curr_move+1)
-		steps_and_sample_list = [(step_size, True)] * (remaining_moves//step_size)
-		if remaining_moves%step_size > 0:
-			steps_and_sample_list += [ (remaining_moves%step_size, False) ]
-		else:
-			steps_and_sample_list[-1][1] = False
-		return steps_and_sample_list
-
-
-
-	def _integrate(self, varpars, steps):
-		for step in range(1, steps+1):
-			grad = self._compute_grad(varpars)
-			varpars = self._update_varpars(varpars, grad)
-			noise = self._generate_noise()
-
-			with torch.no_grad():
-				for layer in self.model.weights:
-					self.model.weights[layer] += - varpars["dt"]*varpars["G-1"][layer]*grad[layer] + noise[layer]*torch.sqrt(2*varpars["dt"]*varpars["T"]*varpars["G-1"][layer])
-
-		return varpars
-
-
-
-	def _sample(self, varpars, move):
-		data = {
-			'move': move,
-			'time': ptime()-self.t0,
-			'q': compute_q(self.model.weights, self.weights_ref).item(),
-			'd2': compute_d2(self.model.weights, self.weights_ref).item(),
-		}
-		obs = self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], bss=varpars['bss'])
-		data = merge_dict(from_dict=obs, into_dict=data)
-		self._extend_buffer(data)
 		return data
 
 
+
+	def _extract_and_integrate(self, pars):
+		momenta = self._init_momenta(pars)
+		Ki = self._compute_K(momenta, pars)
+
+		for step in range(1, pars['isteps']+1):
+			x, y = self._extract_mb(pars)
+
+			old_grad = self._compute_grad(pars, x, y)
+			with torch.no_grad():
+				for layer in self.model.weights:
+					self.model.weights[layer] += momenta[layer]*pars['dt']/pars['M'] - old_grad[layer]*pars['dt']**2./(2.*pars['M'])
+
+			new_grad = self._compute_grad(pars, x, y)
+			for layer in self.model.weights:
+				momenta[layer] -= (new_grad[layer]+old_grad[layer])*pars['dt']/2.
+
+		obs = self._compute_observables(lamda=pars['lamda'], gamma=pars['gamma'], bss=pars['bss'])
+		Kf = self._compute_K(momenta, pars)
+		torch.cuda.empty_cache()
+		return obs, Kf-Ki
+
+
+
+	def _init_momenta(self, pars):
+		momenta = {
+			layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get()) * np.sqrt(pars['T']*pars['M'])
+			for layer, values in self.model.weights.items()
+		}
+		return momenta
+
+	def _compute_K(self, momenta, pars):
+		K = 0.
+		for layer in momenta:
+			K += (0.5*(momenta[layer]**2.)/pars["M"]).sum()
+		return K.item()
 
 	def _compute_observables(self, lamda, gamma, bss=None, x=None, y=None):
 		mod2 = compute_mod2(self.model.weights)
 		d2 = compute_d2(self.model.weights, self.weights_ref)
 
-		# used during _integrate(), to compute the gradient on the current mini-batch (i.e. x, y)
+		# used during _extract_and_integrate(), to compute the gradient on the current mini-batch (i.e. x, y)
 		if bss is None:
 			fx = self.model(x)
 			cost = self.Cost(fx, y)
@@ -316,7 +318,7 @@ class pSGLDSampler():
 			loss.backward(retain_graph=False)
 			return None
 
-		# used during _sample(), to compute the values of the observables on the full-batch
+		# used at the end of _extract_and_integrate(), to compute the values of the observables on the full-batch
 		else:
 			mod2 = mod2.detach().item()
 			d2 = d2.detach().item()
@@ -356,35 +358,21 @@ class pSGLDSampler():
 
 			return obs
 
-	def _generate_noise(self):
-		return {
-			layer: torch.randn(values.shape, device=self.model.device, generator=self.generator.get())
-			for layer, values in self.model.weights.items()
-		}
-
-	def _compute_grad(self, varpars):
+	def _extract_mb(self, pars):
 		#mb_mask = torch.zeros((len(self.datasets["train"]),), dtype=torch.bool)
-		#mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
+		#mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(pars['mbs'],), device=self.model.device, generator=self.generator.get())
+		#WRONG: mb_idxs = torch.randperm(len(self.datasets["train"]), device=self.model.device, generator=self.generator.get())[:pars['mbs']]
 		#mb_mask[mb_idxs] = True
 		#x, y = self.datasets["train"][mb_mask]
-		mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(varpars['mbs'],), device=self.model.device, generator=self.generator.get())
+		mb_idxs = torch.randint(low=0, high=len(self.datasets["train"]), size=(pars['mbs'],), device=self.model.device, generator=self.generator.get())
 		x, y = self.datasets["train"][mb_idxs]
-		self._compute_observables(lamda=varpars['lamda'], gamma=varpars['gamma'], x=x, y=y)
+		return x, y
+
+	def _compute_grad(self, pars, x, y):
+		_ = self._compute_observables(lamda=pars['lamda'], gamma=pars['gamma'], x=x, y=y)
 		grad = self.model.copy(grad=True)
 		self.model.zero_grad()
 		return grad
-
-	def _update_varpars(self, varpars, grad=None):
-		if "V" not in varpars.keys():
-			varpars["V"] = {
-				layer: torch.zeros(weight.shape, device=self.model.device) for layer, weight in self.model.weights.items()
-			}
-			varpars["G-1"] = {}
-		else:
-			for layer, grad_l in grad.items():
-				varpars["V"][layer] = varpars["k2"]*varpars["V"][layer] + (1-varpars["k2"])*(grad_l**2)
-				varpars["G-1"][layer] = 1 / (2 * (varpars["k1"] + torch.sqrt(varpars["V"][layer])))
-		return varpars
 
 
 
@@ -406,19 +394,17 @@ class pSGLDSampler():
 		self.buffer.seek(0)
 		self.buffer.truncate(0)
 
-	def _save_log(self, data, varpars, settings, is_ref=False):
+	def _save_log(self, data, settings, is_ref=False):
 		self._flush_buffer(settings)
 
 		files_log_names = {
+			"weights": f'{settings["weights_dir"]}/weights_{data["move"]}.pt' if settings[f"save_weights"] else f'{settings["weights_dir"]}/weights.pt',
 			"generator": f'{settings["results_dir"]}/generator.npy',
 			"weights_ref": f'{settings["weights_dir"]}/weights_ref.pt',
 		}
-		for key in ["weights", "varpars"]:
-			files_log_names[key] = f'{settings["weights_dir"]}/{key}_{data["move"]}.pt' if settings[f"save_{key}"] else f'{settings["weights_dir"]}/{key}.pt'
 
 		self.model.save(files_log_names["weights"])
 		self.generator.save(files_log_names["generator"])
-		torch.save(varpars, files_log_names["varpars"])
 		if is_ref:
 			self.model.save(files_log_names["weights_ref"])
 
@@ -434,6 +420,7 @@ class pSGLDSampler():
 			print(f'// {self.name} status register:')
 			print(f'{self.separator}\n{self.header}\n{self.separator}')
 
+		data['ar'] = data['am'] / data['move'] if data['move'] > 0 else 1.
 		data['time_h'] = data["time"] / 3600.
 
 		line = ''
@@ -442,10 +429,11 @@ class pSGLDSampler():
 		for key, _, fp in self.formatter['efficiency']: line = f'{line}|{format(data[f"{key}"], f".{fp}f"):^12}'
 		line = f'{line}|'
 
+		data.pop('ar')
 		data.pop('time_h')
 		print(f'{line}\n{self.separator}')
 	
-	def _print_pars(self, pars_idx, settings, idx):
+	def _print_pars(self, pars, settings, idx):
 		fixed = ''
 		for name, param in self.model.NN.named_parameters():
 			if not param.requires_grad:
@@ -455,21 +443,18 @@ class pSGLDSampler():
 		lines = []
 		lines.append(f'# {self.name} parameters summary:')
 		lines.append(f'# ')
-		lines.append(f'# moves:             {pars_idx["moves"]:.1e}')
-		lines.append(f'# temperature:       {pars_idx["T"]:.1e}')
-		lines.append(f'# time step:         {pars_idx["dt"]:.1e}')
-		lines.append(f'# k1 (G^-1):         {pars_idx["k1"]:.1e}')
-		lines.append(f'# k2 (V):            {pars_idx["k2"]:.2f}')
-		lines.append(f'# lamda:             {pars_idx["lamda"]:.1e}')
-		lines.append(f'# gamma:             {pars_idx["gamma"]:.1e}')
-		lines.append(f'# mini-batch size:   {pars_idx["mbs"]:.0f}')
+		lines.append(f'# moves:                      {pars["moves"]:.1e}')
+		lines.append(f'# temperature:                {pars["T"]:.1e}')
+		lines.append(f'# integration time step:      {pars["dt"]:.1e}')
+		lines.append(f'# per-move integration steps: {pars["isteps"]:.0f}')
+		lines.append(f'# weights mass:               {pars["M"]:.2f}')
+		lines.append(f'# mini-batch size:            {pars["mbs"]:.0f}')
 		lines.append(f'# ')
 		lines.append(f'# fixed layers: {fixed}')
 		lines.append(f'# ')
 		lines.append(f'# results directory: {settings["results_dir"]}')
 		lines.append(f'# weights directory: {settings["weights_dir"]}')
 		lines.append(f'# save all weights:  {settings["save_weights"]}')
-		lines.append(f'# save all varpars:  {settings["save_varpars"]}')
 		if idx == 0:
 			lines.append(f'# restart:           {bool(settings["restart"])}')
 		lines.append(f'# ')
@@ -487,14 +472,14 @@ class pSGLDSampler():
 
 	def _correct_types(self, d, dname):
 		# pars dictionary
-		if dname == "varpars":
+		if dname == "pars":
 			types_and_keys = [
-					(int,  ['moves', 'tot_moves', 'mbs', 'bss']),
+					(int,  ['moves', 'tot_moves', 'isteps', 'bss', 'mbs']),
 					(bool, ['adj_ref']),
 			]
 		# data dictionary
 		else:
-			types_and_keys = [(int, ['move'])]
+			types_and_keys = [(int, ['move', 'am'])]
 
 		for key in d:
 			for _type, keys in types_and_keys:
@@ -506,17 +491,19 @@ class pSGLDSampler():
 	def _init_attributes(self):
 		self.buffer = StringIO()
 
+		# Necessary parameters:
+        # "stime", "T"
 		self.defpars = {
 			"stime":(None, float),
 			"T": (None, float),
 			"dt": (1.0, float),
-			"k1": (1.0e-5, float),
-			"k2": (0.99, float),
-			"lamda": (0., float),
-			"gamma": (0., float),
-			"adj_ref": (1, bool),
-			"mbs": (128, int),
+			"isteps": (100, int),
+			"M": (1.0, float),
+			"gamma": (0.0, float),
+			"adj_ref": (True, bool),
+			"lamda": (0.0, float),
 			"bss": (0, int),
+			"mbs": (128, int),
 			"seed": (0, int),
 		}
 
@@ -524,11 +511,10 @@ class pSGLDSampler():
 			"results_dir": ("./results", str),
 			"weights_dir": ("./results/weights", str),
 			"save_weights": (True, bool),
-			"save_varpars": (True, bool),
-			"data_step": (1000, int),
-			"log_step": (10000, int),
-			"print_step": (1000, int),
-			"step_scale": (100, int),
+			"data_step": (1, int),
+			"log_step": (1, int),
+			"print_step": (1, int),
+			"step_scale": (1, int),
 			"restart": (False, bool),
 			"device": ("cpu", str),
 			"num_threads": (1, int),
@@ -544,11 +530,12 @@ class pSGLDSampler():
 			] + [
 				['mod2', 'mod2', 1],
 				['time_h', 'time', 2],
-            ],
+			],
 			'efficiency':[
 				['move', 'move', 0],
 				['q', 'q', 5],
-				['d2', 'd2', 3],
+				['d2', 'd2', 5],
+				['ar', 'ar', 3],
 			],
 		}
 
