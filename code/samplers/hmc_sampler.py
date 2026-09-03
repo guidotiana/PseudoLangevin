@@ -56,7 +56,7 @@ class HMCSampler():
 			data = self._correct_types(data, "data")
 			pars = self._correct_types(pars, "pars")
 
-            wi = self.model.copy(grad=False)
+			wi = self.model.copy(grad=False)
 			for move in range(data["move"]+1, pars["tot_moves"]+1):
 				# Extract momenta and integrate the equations of motion
 				obf, dK = self._extract_and_integrate(pars)
