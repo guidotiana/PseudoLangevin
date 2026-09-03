@@ -56,10 +56,8 @@ class HMCSampler():
 			data = self._correct_types(data, "data")
 			pars = self._correct_types(pars, "pars")
 
+            wi = self.model.copy(grad=False)
 			for move in range(data["move"]+1, pars["tot_moves"]+1):
-				# Save starting weights vector
-				wi = self.model.copy(grad=False)
-
 				# Extract momenta and integrate the equations of motion
 				obf, dK = self._extract_and_integrate(pars)
 
@@ -150,11 +148,11 @@ class HMCSampler():
 			assert all([v>=0. for k,v in pars_list[idx].items() if k in ["gamma", "lamda", "bss"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("gamma", "lamda", "bss") at index {idx}. Allowed values: v>=0.'
 			)
-			assert all([v>0. for k,v in pars_list[0].items() if k in ["stime", "moves", "tot_moves", "T", "dt", "M"]]), (
+			assert all([v>0. for k,v in pars_list[idx].items() if k in ["stime", "moves", "tot_moves", "T", "dt", "M"]]), (
 			    f'{self.name}._setup(): invalid value for one of the following keys ',
 			    f'("stime", "moves", "tot_moves", "T", "dt", "M") at index {idx}. Allowed values: v>0.'
 			)
-			assert all([v in [0,1] for k,v in pars_list[idx].items() if k in ["adj_ref"]]), (
+			assert pars_list[idx]["adj_ref"] in [0,1], (
 			    f'{self.name}._setup(): invalid value for one of the following keys ("adj_ref") at index {idx}. Allowed values: v==0 or v==1.'
 			)
 			if pars_list[idx]["bss"] == 0:

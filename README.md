@@ -57,7 +57,7 @@ As a prerequisite, you must have PyTorch installed to use this repository. You c
 git clone "https://github.com/guidotiana/PseudoLangevin"
 ```
 
-Once you cloned this directory, you must define the neural network, the dataset, and the cost and metric functions for your problem. In this instance, the model is a three-layer feedforward neural network with ReLU activation functions on each layer, the dataset consists of binary spin vectors, and the cost and metric functions are the cross-entropy and the error function, respectively.
+Once you cloned this directory, you must define the neural network, the dataset, and the cost and metric functions for your problem. In this instance, the model is a three-layer feedforward neural network with ReLU activation functions on each layer, the dataset consists of binary spin vectors, and the cost and metric functions are the cross-entropy and the error functions, respectively.
 ```python
 import torch
 import torch.nn.functional as F
