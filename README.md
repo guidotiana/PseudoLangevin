@@ -1,6 +1,6 @@
 # Pseudo-Langevin sampling
 
-This repository contains the data, code, and usage templates associated with the recently published articles [PAPER-1](http://arxiv.org/abs/2603.15367) and [PAPER-2](http://arxiv.org/abs/2603.29529).
+This repository contains the data, code, and usage templates associated with the published articles [PAPER-1](http://arxiv.org/abs/2603.15367) and [PAPER-2](http://arxiv.org/abs/2603.29529).
 
 
 <details open><summary><b>Table of contents</b></summary>
@@ -37,7 +37,7 @@ The `code/` directory is the core of this repository, as it contains the impleme
 
 #### datasets/ <a name="Code_datasets"></a>
 - `KSpin/`: directory containing the code used to generate datasets of binary spin vectors, as described in [PAPER-1](http://arxiv.org/abs/2603.15367).
-- `MNIST/`: directory containing dowloaded MNIST images and the code used to generate datasets from them, as described in [PAPER-1](http://arxiv.org/abs/2603.15367). 
+- `MNIST/`: directory containing downloaded MNIST images and the code used to generate datasets from them, as described in [PAPER-1](http://arxiv.org/abs/2603.15367). 
 - `Protein/`: directory containing masked sequences derived from the acyl–coenzyme A binding protein contact map and the code to generate datasets from them, as described in [PAPER-2](http://arxiv.org/abs/2603.29529).
 
 #### generator/ <a name="Code_generator"></a>
